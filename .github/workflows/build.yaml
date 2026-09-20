@@ -30,6 +30,9 @@ jobs:
           echo "--- 复制配置文件到项目目录 ---"
           cp build.yaml Jellyfin.Plugin.FolderCollections/build.yaml
           
+          echo "--- 创建输出文件夹（关键一步！）---"
+          mkdir -p ${{ github.workspace }}/artifacts
+          
           echo "--- 进入项目目录并执行打包 ---"
           cd Jellyfin.Plugin.FolderCollections
           jprm --verbosity debug plugin build . --dotnet-framework net8.0 --dotnet-configuration Release --version 1.0.0.0 --output ${{ github.workspace }}/artifacts
