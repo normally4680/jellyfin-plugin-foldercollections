@@ -27,14 +27,18 @@ jobs:
 
       - name: Build Plugin
         run: |
-          mkdir -p ./artifacts
-          jprm plugin build Jellyfin.Plugin.FolderCollections --dotnet-framework net8.0 --version 1.0.0.0 --output ./artifacts
+          echo "--- 复制配置文件到项目目录 ---"
+          cp build.yaml Jellyfin.Plugin.FolderCollections/build.yaml
+          
+          echo "--- 进入项目目录并执行打包 ---"
+          cd Jellyfin.Plugin.FolderCollections
+          jprm --verbosity debug plugin build . --dotnet-framework net8.0 --dotnet-configuration Release --version 1.0.0.0 --output ${{ github.workspace }}/artifacts
 
       - name: Debug - Find zip files
-        run: find . -name "*.zip"
+        run: find ${{ github.workspace }}/artifacts -name "*.zip"
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: Jellyfin.Plugin.FolderCollections
-          path: ./artifacts/*.zip
+          path: ${{ github.workspace }}/artifacts/*.zip
