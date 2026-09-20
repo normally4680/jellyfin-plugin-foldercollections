@@ -1,6 +1,6 @@
 <Solution>
-  <Folder Name="/Jellyfin.Plugin.Template/">
-    <Project Path="Jellyfin.Plugin.Template/Jellyfin.Plugin.FolderCollections.csproj" />
+  <Folder Name="/Jellyfin.Plugin.FolderCollections/">
+    <Project Path="Jellyfin.Plugin.FolderCollections/Jellyfin.Plugin.FolderCollections.csproj" />
   </Folder>
   <Project Path="Jellyfin.Plugin.FolderCollections/Jellyfin.Plugin.FolderCollections.csproj" />
 </Solution>

@@ -36,7 +36,7 @@ public class Plugin : BasePlugin<PluginConfiguration>, IHasWebPages
     public override Guid Id => StaticId;
 
     /// <inheritdoc />
-    public override string Description => "根据物理文件夹结构自动生成媒体集合，且跟随媒体库扫描自动更新.";
+    public override string Description => "根据物理文件夹结构自动生成媒体集合，且跟随媒体库扫描自动更新";
 
     /// <inheritdoc />
     public IEnumerable<PluginPageInfo> GetPages()
