@@ -1,0 +1,21 @@
+# 编译输出（仅限根目录和子目录的 bin obj）
+[Bb]in/
+[Oo]bj/
+
+# 编辑器与系统
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+.DS_Store
+Thumbs.db
+
+# 日志与测试
+*.log
+TestResults/
+
+# 构建产物
+artifacts/
+publish/
+*.zip

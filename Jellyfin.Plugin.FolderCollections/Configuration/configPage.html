@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <title>Folder Collections</title>
+</head>
+
+<body>
+    <div id="FolderCollectionsConfigPage" data-role="page" class="page type-interior pluginConfigurationPage"
+        data-require="emby-input,emby-button,emby-checkbox">
+        <div data-role="content">
+            <div class="content-primary">
+                <form id="FolderCollectionsConfigForm">
+                    <h2>文件夹自动集合配置</h2>
+
+                    <div class="checkboxContainer">
+                        <label>
+                            <input type="checkbox" id="chkOverwriteExisting" is="emby-checkbox" />
+                            <span>覆盖已存在的同名集合</span>
+                        </label>
+                        <div class="fieldDescription">
+                            勾选后，每次扫描会清空已有集合内容并重新添加；不勾选则保留现有集合。
+                        </div>
+                    </div>
+
+                    <div class="checkboxContainer">
+                        <label>
+                            <input type="checkbox" id="chkScanOnStartup" is="emby-checkbox" />
+                            <span>服务器启动时自动扫描</span>
+                        </label>
+                        <div class="fieldDescription">
+                            开启后，Jellyfin 启动完成后会自动执行一次扫描。
+                        </div>
+                    </div>
+
+                    <div class="checkboxContainer">
+                        <label>
+                            <input type="checkbox" id="chkRemoveObsolete" is="emby-checkbox" />
+                            <span>自动删除不再需要的集合</span>
+                        </label>
+                        <div class="fieldDescription">
+                            开启后，当媒体库中的文件夹被删除后，插件会自动清理对应的集合。仅删除由本插件创建的集合。
+                        </div>
+                    </div>
+
+                    <div class="checkboxContainer">
+                        <label>
+                            <input type="checkbox" id="chkAutoSync" is="emby-checkbox" />
+                            <span>媒体库扫描完成后自动同步集合</span>
+                        </label>
+                        <div class="fieldDescription">
+                            开启后，每次 Jellyfin 完成媒体库扫描，插件会自动同步集合。关闭后只在你手动点击"立即扫描"时同步。
+                        </div>
+                    </div>
+
+                    <div class="inputContainer">
+                        <label class="inputLabel" for="txtMaxNameLength">集合名最大字符长度（0=不限制）</label>
+                        <input id="txtMaxNameLength" type="number" is="emby-input" min="0" max="200" />
+                        <div class="fieldDescription">
+                            超过此长度时，用哈希后缀保证集合名唯一且不超长。推荐 80。
+                        </div>
+                    </div>
+
+                    <br />
+                    <h3>选择需要扫描的媒体库</h3>
+                    <div id="libraryList" class="checkboxList">
+                        <!-- 媒体库列表通过 JS 动态插入 -->
+                    </div>
+
+                    <br />
+                    <div>
+                        <button is="emby-button" type="submit" class="raised button-submit block emby-button">
+                            <span>保存配置</span>
+                        </button>
+                    </div>
+
+                    <br />
+                    <div>
+                        <button is="emby-button" type="button" id="btnTriggerScan"
+                            class="raised button-alt block emby-button">
+                            <span>立即扫描</span>
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <script type="text/javascript">
+            (function () {
+                var pluginId = '3f2504e0-4f89-11d3-9a0c-0305e82c3301'; // 与你 Plugin.cs 中的 GUID 一致
+
+                var FolderCollectionsConfigPage = {
+                    loadConfig: function () {
+                        Dashboard.showLoadingMsg();
+                        ApiClient.getPluginConfiguration(pluginId).then(function (config) {
+                            document.querySelector('#chkOverwriteExisting').checked = config.OverwriteExisting;
+                            document.querySelector('#chkScanOnStartup').checked = config.ScanOnStartup;
+                            document.querySelector('#chkRemoveObsolete').checked = config.RemoveObsoleteCollections !== false;
+                            document.querySelector('#txtMaxNameLength').value = config.MaxNameLength || 0;
+                            document.querySelector('#chkAutoSync').checked = config.AutoSyncAfterLibraryScan !== false;
+                            FolderCollectionsConfigPage.renderLibraries(config.SelectedLibraryIds || []);
+                            Dashboard.hideLoadingMsg();
+                        });
+                    },
+
+                    renderLibraries: function (selectedIds) {
+                        ApiClient.getVirtualFolders().then(function (folders) {
+                            var container = document.querySelector('#libraryList');
+                            container.innerHTML = '';
+                            folders.forEach(function (folder) {
+                                var id = folder.ItemId;
+                                var checked = selectedIds.indexOf(id) !== -1 ? 'checked' : '';
+                                var html = '<label class="checkboxContainer">'
+                                    + '<input type="checkbox" is="emby-checkbox" class="libraryCheckbox" data-id="' + id + '" ' + checked + ' />'
+                                    + '<span>' + folder.Name + '</span>'
+                                    + '</label>';
+                                container.insertAdjacentHTML('beforeend', html);
+                            });
+                        });
+                    },
+
+                    saveConfig: function () {
+                        Dashboard.showLoadingMsg();
+
+                        var selectedIds = [];
+                        document.querySelectorAll('.libraryCheckbox:checked').forEach(function (cb) {
+                            selectedIds.push(cb.getAttribute('data-id'));
+                        });
+
+                        ApiClient.getPluginConfiguration(pluginId).then(function (config) {
+                            config.SelectedLibraryIds = selectedIds;
+                            config.OverwriteExisting = document.querySelector('#chkOverwriteExisting').checked;
+                            config.ScanOnStartup = document.querySelector('#chkScanOnStartup').checked;
+                            config.RemoveObsoleteCollections = document.querySelector('#chkRemoveObsolete').checked;
+                            config.MaxNameLength = parseInt(document.querySelector('#txtMaxNameLength').value) || 0;
+                            config.AutoSyncAfterLibraryScan = document.querySelector('#chkAutoSync').checked;
+                            ApiClient.updatePluginConfiguration(pluginId, config).then(function () {
+                                Dashboard.processPluginConfigurationUpdateResult();
+                            });
+                        });
+                    },
+
+                    triggerScan: function () {
+                        Dashboard.showLoadingMsg();
+                        ApiClient.ajax({
+                            type: 'POST',
+                            url: ApiClient.getUrl('FolderCollections/Scan')
+                        }).then(function () {
+                            Dashboard.hideLoadingMsg();
+                            Dashboard.alert('扫描已启动，请查看 Jellyfin 控制台日志。');
+                        });
+                    }
+                };
+
+                document.querySelector('#FolderCollectionsConfigForm')
+                    .addEventListener('submit', function (e) {
+                        e.preventDefault();
+                        FolderCollectionsConfigPage.saveConfig();
+                        return false;
+                    });
+
+                document.querySelector('#btnTriggerScan')
+                    .addEventListener('click', function () {
+                        FolderCollectionsConfigPage.triggerScan();
+                    });
+
+                FolderCollectionsConfigPage.loadConfig();
+            })();
+        </script>
+    </div>
+</body>
+
+</html>
