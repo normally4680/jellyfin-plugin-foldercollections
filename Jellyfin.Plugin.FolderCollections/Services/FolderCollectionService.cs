@@ -240,18 +240,21 @@ public class FolderCollectionService
             }
         }
 
-        // 输出汇总
-        _logger.LogInformation(
-            "本次扫描统计：新增集合 {Created} 个，更新集合 {Updated} 个，未变化 {Unchanged} 个，共涉及 {MediaCount} 个媒体项。",
-            totalCreated,
-            totalUpdated,
-            totalUnchanged,
-            totalMediaItems);
-
+        // 清理过时集合并获取删除数量
+        int totalRemoved = 0;
         if (config.RemoveObsoleteCollections)
         {
-            await CleanupObsoleteCollectionsAsync(allCollectionNames).ConfigureAwait(false);
+            totalRemoved = await CleanupObsoleteCollectionsAsync(allCollectionNames).ConfigureAwait(false);
         }
+
+        // 输出汇总（含删除）
+        _logger.LogInformation(
+            "本次扫描统计：新增集合 {Created} 个，更新集合 {Updated} 个，删除集合 {Removed} 个，未变化 {Unchanged} 个，共涉及 {MediaCount} 个媒体项。",
+            totalCreated,
+            totalUpdated,
+            totalRemoved,
+            totalUnchanged,
+            totalMediaItems);
 
         _logger.LogInformation("所有媒体库扫描完成。");
     }
@@ -531,7 +534,7 @@ public class FolderCollectionService
         _logger.LogInformation("已标记并锁定集合 \"{Name}\" 的元数据。", collection.Name);
     }
 
-    private async Task CleanupObsoleteCollectionsAsync(HashSet<string> currentNames)
+    private async Task<int> CleanupObsoleteCollectionsAsync(HashSet<string> currentNames)
     {
         _logger.LogInformation("开始检查过时集合...");
 
@@ -576,6 +579,7 @@ public class FolderCollectionService
         }
 
         _logger.LogInformation("过时集合清理完成，共删除 {Count} 个集合。", removedCount);
+        return removedCount;
     }
 
     /// <summary>
