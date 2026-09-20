@@ -1,20 +1,36 @@
-name: '🏗️ Build Plugin'
+name: Build Plugin
 
 on:
   push:
-    branches:
-      - main
-    paths-ignore:
-      - '**/*.md'
-  pull_request:
-    branches:
-      - main
-    paths-ignore:
-      - '**/*.md'
+    branches: [ main ]
   workflow_dispatch:
 
 jobs:
-  call:
-    uses: jellyfin/jellyfin-meta-plugins/.github/workflows/build.yaml@master
-    with:
-      dotnet-version: '8.0.x'
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install JPRM
+        run: pip install jprm
+
+      - name: Build Plugin
+        run: |
+          jprm build --dotnet-framework net8.0 --output ./artifacts
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Jellyfin.Plugin.FolderCollections
+          path: ./artifacts/*.zip
