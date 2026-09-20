@@ -83,6 +83,81 @@ public class FolderCollectionService
         int totalUnchanged = 0;
         int totalMediaItems = 0;
 
+        // 分批全库查询所有候选媒体项（避免任何内部 Limit 截断）
+        const int BatchSize = 5000;
+        var allItemsById = new Dictionary<Guid, BaseItem>();
+        int offset = 0;
+        int batchIndex = 0;
+
+        while (true)
+        {
+            batchIndex++;
+
+            var batchQuery = new InternalItemsQuery
+            {
+                Recursive = true,
+                Limit = BatchSize,
+                StartIndex = offset,
+                EnableTotalRecordCount = false,
+                IncludeItemTypes = new[]
+                {
+            BaseItemKind.Movie,
+            BaseItemKind.Episode,
+            BaseItemKind.Video,
+            BaseItemKind.Photo,
+            BaseItemKind.MusicVideo,
+            BaseItemKind.Audio,
+            BaseItemKind.Trailer
+                },
+                OrderBy = new[]
+                {
+            (ItemSortBy.SortName, SortOrder.Ascending)
+                }
+            };
+
+            var batch = _libraryManager.GetItemList(batchQuery);
+
+            if (batch.Count == 0)
+            {
+                _logger.LogInformation("第 {Index} 批返回 0 条，全库查询结束。累计 {Total} 条。", batchIndex, allItemsById.Count);
+                break;
+            }
+
+            int newCount = 0;
+            foreach (var item in batch)
+            {
+                if (!allItemsById.ContainsKey(item.Id))
+                {
+                    allItemsById[item.Id] = item;
+                    newCount++;
+                }
+            }
+
+            _logger.LogInformation(
+                "第 {Index} 批获取 {BatchCount} 条（新增 {NewCount} 条，去重后累计 {Total} 条）。",
+                batchIndex,
+                batch.Count,
+                newCount,
+                allItemsById.Count);
+
+            if (batch.Count < BatchSize)
+            {
+                _logger.LogInformation("最后一批不足 {BatchSize} 条，全库查询结束。累计 {Total} 条。", BatchSize, allItemsById.Count);
+                break;
+            }
+
+            offset += BatchSize;
+
+            if (batchIndex > 10000)
+            {
+                _logger.LogWarning("已查询 {BatchCount} 批仍未结束，可能存在分页异常，强制中止。", batchIndex);
+                break;
+            }
+        }
+
+        var allItems = allItemsById.Values.ToList();
+        _logger.LogInformation("全库共查询到 {Count} 个候选媒体项（按 Id 去重后），准备按媒体库路径筛选...", allItems.Count);
+
         foreach (var libraryId in config.SelectedLibraryIds)
         {
             var library = _libraryManager.GetItemById(libraryId) as CollectionFolder;
@@ -104,26 +179,28 @@ public class FolderCollectionService
                 continue;
             }
 
-            _logger.LogInformation("正在扫描媒体库: {LibraryName}", library.Name);
+            _logger.LogInformation("正在处理媒体库: {LibraryName}", library.Name);
 
-            var query = new InternalItemsQuery
+            // 用路径匹配筛选出属于本媒体库的媒体项
+            var items = new List<BaseItem>();
+            foreach (var item in allItems)
             {
-                ParentId = libraryId,
-                Recursive = true,
-                IncludeItemTypes = new[]
+                if (string.IsNullOrEmpty(item.Path))
                 {
-                    BaseItemKind.Movie,
-                    BaseItemKind.Episode,
-                    BaseItemKind.Video,
-                    BaseItemKind.Photo,
-                    BaseItemKind.MusicVideo,
-                    BaseItemKind.Audio,
-                    BaseItemKind.Trailer
+                    continue;
                 }
-            };
 
-            var items = _libraryManager.GetItemList(query);
-            _logger.LogInformation("媒体库 \"{LibraryName}\" 共查询到 {Count} 个媒体项。", library.Name, items.Count);
+                foreach (var location in locations)
+                {
+                    if (item.Path.StartsWith(location, StringComparison.OrdinalIgnoreCase))
+                    {
+                        items.Add(item);
+                        break;
+                    }
+                }
+            }
+
+            _logger.LogInformation("媒体库 \"{LibraryName}\" 共匹配到 {Count} 个媒体项。", library.Name, items.Count);
 
             var groups = new Dictionary<string, List<Guid>>(StringComparer.OrdinalIgnoreCase);
             var groupTags = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
@@ -249,10 +326,10 @@ public class FolderCollectionService
 
         // 输出汇总（含删除）
         _logger.LogInformation(
-            "本次扫描统计：新增集合 {Created} 个，删除集合 {Removed} 个，更新集合 {Updated} 个，未变化 {Unchanged} 个，共涉及 {MediaCount} 个媒体项。",
+            "本次扫描统计：新增集合 {Created} 个，更新集合 {Updated} 个，删除集合 {Removed} 个，未变化 {Unchanged} 个，共涉及 {MediaCount} 个媒体项。",
             totalCreated,
-            totalRemoved,
             totalUpdated,
+            totalRemoved,
             totalUnchanged,
             totalMediaItems);
 
