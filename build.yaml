@@ -2,7 +2,7 @@
 name: "Folder Collections"
 guid: "3f2504e0-4f89-11d3-9a0c-0305e82c3301"
 version: "1.0.0.0"
-targetAbi: "10.9.0.0"
+targetAbi: "10.10.7"
 framework: "net8.0"
 overview: "Short description about your plugin"
 description: >

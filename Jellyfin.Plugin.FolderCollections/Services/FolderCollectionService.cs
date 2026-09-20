@@ -18,6 +18,21 @@ using Microsoft.Extensions.Logging;
 namespace Jellyfin.Plugin.FolderCollections.Services;
 
 /// <summary>
+/// 集合操作结果.
+/// </summary>
+public enum CollectionOperationResult
+{
+    /// <summary>集合内容无变化.</summary>
+    Unchanged,
+
+    /// <summary>集合被创建.</summary>
+    Created,
+
+    /// <summary>集合内容被更新（新增或移除媒体项）.</summary>
+    Updated
+}
+
+/// <summary>
 /// 文件夹自动集合服务.
 /// </summary>
 public class FolderCollectionService
@@ -61,6 +76,12 @@ public class FolderCollectionService
         _logger.LogInformation("开始扫描文件夹集合...");
 
         var allCollectionNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // 全局统计（跨媒体库）
+        int totalCreated = 0;
+        int totalUpdated = 0;
+        int totalUnchanged = 0;
+        int totalMediaItems = 0;
 
         foreach (var libraryId in config.SelectedLibraryIds)
         {
@@ -199,9 +220,33 @@ public class FolderCollectionService
                     kvp.Value.Count,
                     string.Join(", ", tags));
 
-                await CreateOrUpdateCollectionAsync(kvp.Key, kvp.Value, tags, config.OverwriteExisting).ConfigureAwait(false);
+                var result = await CreateOrUpdateCollectionAsync(
+                    kvp.Key, kvp.Value, tags, config.OverwriteExisting).ConfigureAwait(false);
+
+                totalMediaItems += kvp.Value.Count;
+
+                switch (result)
+                {
+                    case CollectionOperationResult.Created:
+                        totalCreated++;
+                        break;
+                    case CollectionOperationResult.Updated:
+                        totalUpdated++;
+                        break;
+                    default:
+                        totalUnchanged++;
+                        break;
+                }
             }
         }
+
+        // 输出汇总
+        _logger.LogInformation(
+            "本次扫描统计：新增集合 {Created} 个，更新集合 {Updated} 个，未变化 {Unchanged} 个，共涉及 {MediaCount} 个媒体项。",
+            totalCreated,
+            totalUpdated,
+            totalUnchanged,
+            totalMediaItems);
 
         if (config.RemoveObsoleteCollections)
         {
@@ -229,7 +274,7 @@ public class FolderCollectionService
         return prefix + "-" + hashStr;
     }
 
-    private async Task CreateOrUpdateCollectionAsync(
+    private async Task<CollectionOperationResult> CreateOrUpdateCollectionAsync(
         string collectionName,
         List<Guid> itemIds,
         HashSet<string> customTags,
@@ -244,11 +289,7 @@ public class FolderCollectionService
 
         if (existing != null)
         {
-            var existingItems = _libraryManager.GetItemIds(new InternalItemsQuery
-            {
-                ParentId = existing.Id,
-                Recursive = true
-            }).ToHashSet();
+            var existingItems = GetCollectionItemIds(existing);
 
             var targetItems = itemIds.ToHashSet();
 
@@ -262,37 +303,51 @@ public class FolderCollectionService
                 }
 
                 await _collectionManager.AddToCollectionAsync(existing.Id, targetItems.ToArray()).ConfigureAwait(false);
+
+                await TrySetCollectionCoverAsync(existing, itemIds).ConfigureAwait(false);
+                await UpdateCollectionTagsAsync(existing, customTags).ConfigureAwait(false);
+                await MarkCollectionAsync(existing).ConfigureAwait(false);
+
+                _logger.LogInformation("集合 \"{Name}\" 重建完成，现包含 {Count} 个媒体项。", collectionName, targetItems.Count);
+                return CollectionOperationResult.Updated;
             }
             else
             {
                 var toAdd = targetItems.Except(existingItems).ToArray();
                 var toRemove = existingItems.Except(targetItems).ToArray();
 
-                if (toAdd.Length > 0 || toRemove.Length > 0)
+                if (toAdd.Length == 0 && toRemove.Length == 0)
                 {
-                    _logger.LogInformation(
-                        "正在同步集合 \"{Name}\"：新增 {Add} 个，移除 {Remove} 个。",
-                        collectionName,
-                        toAdd.Length,
-                        toRemove.Length);
+                    // 内容无变化，但仍尝试更新封面和标签
+                    await TrySetCollectionCoverAsync(existing, itemIds).ConfigureAwait(false);
+                    await UpdateCollectionTagsAsync(existing, customTags).ConfigureAwait(false);
 
-                    if (toRemove.Length > 0)
-                    {
-                        await _collectionManager.RemoveFromCollectionAsync(existing.Id, toRemove).ConfigureAwait(false);
-                    }
-
-                    if (toAdd.Length > 0)
-                    {
-                        await _collectionManager.AddToCollectionAsync(existing.Id, toAdd).ConfigureAwait(false);
-                    }
+                    return CollectionOperationResult.Unchanged;
                 }
+
+                _logger.LogInformation(
+                    "正在同步集合 \"{Name}\"：新增 {Add} 个，移除 {Remove} 个。",
+                    collectionName,
+                    toAdd.Length,
+                    toRemove.Length);
+
+                if (toRemove.Length > 0)
+                {
+                    await _collectionManager.RemoveFromCollectionAsync(existing.Id, toRemove).ConfigureAwait(false);
+                }
+
+                if (toAdd.Length > 0)
+                {
+                    await _collectionManager.AddToCollectionAsync(existing.Id, toAdd).ConfigureAwait(false);
+                }
+
+                await TrySetCollectionCoverAsync(existing, itemIds).ConfigureAwait(false);
+                await UpdateCollectionTagsAsync(existing, customTags).ConfigureAwait(false);
+                await MarkCollectionAsync(existing).ConfigureAwait(false);
+
+                _logger.LogInformation("集合 \"{Name}\" 同步完成，现包含 {Count} 个媒体项。", collectionName, targetItems.Count);
+                return CollectionOperationResult.Updated;
             }
-
-            await TrySetCollectionCoverAsync(existing, itemIds).ConfigureAwait(false);
-            await UpdateCollectionTagsAsync(existing, customTags).ConfigureAwait(false);
-            await MarkCollectionAsync(existing).ConfigureAwait(false);
-
-            _logger.LogInformation("集合 \"{Name}\" 同步完成，现包含 {Count} 个媒体项。", collectionName, targetItems.Count);
         }
         else
         {
@@ -309,7 +364,7 @@ public class FolderCollectionService
             if (result == null)
             {
                 _logger.LogWarning("集合 \"{Name}\" 创建返回空结果。", collectionName);
-                return;
+                return CollectionOperationResult.Unchanged;
             }
 
             var newCollection = _libraryManager.GetItemList(new InternalItemsQuery
@@ -327,6 +382,7 @@ public class FolderCollectionService
             }
 
             _logger.LogInformation("创建新集合: {Name}，包含 {Count} 个媒体项", collectionName, itemIds.Count);
+            return CollectionOperationResult.Created;
         }
     }
 
@@ -362,8 +418,16 @@ public class FolderCollectionService
         return Task.CompletedTask;
     }
 
+    /// <summary>
+    /// 尝试为集合设置封面：取第一个有主图的媒体项图片作为集合封面.
+    /// 如果集合已有封面，不会覆盖.
+    /// </summary>
+    /// <param name="collection">集合对象.</param>
+    /// <param name="itemIds">集合内的媒体项 ID 列表（按顺序，第一个有封面的会被选中）.</param>
+    /// <returns>异步任务.</returns>
     private async Task TrySetCollectionCoverAsync(BaseItem collection, List<Guid> itemIds)
     {
+        // 如果集合已有 Primary 图，跳过
         if (collection.HasImage(ImageType.Primary, 0))
         {
             return;
@@ -513,4 +577,64 @@ public class FolderCollectionService
 
         _logger.LogInformation("过时集合清理完成，共删除 {Count} 个集合。", removedCount);
     }
+
+    /// <summary>
+    /// 获取集合中当前包含的媒体项 ID（通过 LinkedChildren 读取，兼容 Jellyfin 10.x）.
+    /// </summary>
+    /// <param name="collection">集合对象.</param>
+    /// <returns>媒体项 ID 集合.</returns>
+    private HashSet<Guid> GetCollectionItemIds(BaseItem collection)
+    {
+        var result = new HashSet<Guid>();
+
+        // BoxSet 继承自 Folder，需要转型后才能调用 GetLinkedChildren
+        if (collection is Folder folder)
+        {
+            try
+            {
+                var children = folder.GetLinkedChildren();
+                if (children != null)
+                {
+                    foreach (var child in children)
+                    {
+                        if (child != null)
+                        {
+                            result.Add(child.Id);
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "通过 GetLinkedChildren 读取集合 \"{Name}\" 成员失败，回退到 ParentId 查询。", collection.Name);
+            }
+        }
+
+        if (result.Count > 0)
+        {
+            return result;
+        }
+
+        // 回退方式
+        try
+        {
+            var ids = _libraryManager.GetItemIds(new InternalItemsQuery
+            {
+                ParentId = collection.Id,
+                Recursive = true
+            });
+
+            foreach (var id in ids)
+            {
+                result.Add(id);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "通过 ParentId 读取集合 \"{Name}\" 成员失败。", collection.Name);
+        }
+
+        return result;
+    }
+
 }
