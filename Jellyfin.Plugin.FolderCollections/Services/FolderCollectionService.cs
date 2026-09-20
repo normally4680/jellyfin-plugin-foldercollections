@@ -500,13 +500,18 @@ public class FolderCollectionService
             return;
         }
 
-        await _libraryManager.UpdateItemAsync(
-            collection,
-            null!,
-            ItemUpdateType.MetadataEdit,
-            CancellationToken.None).ConfigureAwait(false);
+        try
+        {
+            await collection.UpdateToRepositoryAsync(
+                ItemUpdateType.MetadataEdit,
+                CancellationToken.None).ConfigureAwait(false);
 
-        _logger.LogInformation("已同步并锁定集合 \"{Name}\" 的元数据。", collection.Name);
+            _logger.LogInformation("已同步并锁定集合 \"{Name}\" 的元数据。", collection.Name);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "保存集合 \"{Name}\" 元数据时出错。", collection.Name);
+        }
     }
 
     /// <summary>
@@ -551,9 +556,7 @@ public class FolderCollectionService
                     },
                     0);
 
-                await _libraryManager.UpdateItemAsync(
-                    collection,
-                    null!,
+                await collection.UpdateToRepositoryAsync(
                     ItemUpdateType.ImageUpdate,
                     CancellationToken.None).ConfigureAwait(false);
 
