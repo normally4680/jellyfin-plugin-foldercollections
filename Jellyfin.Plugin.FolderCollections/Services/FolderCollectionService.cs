@@ -39,13 +39,6 @@ public class FolderCollectionService
 {
     private const string PluginMarkerTag = "FolderCollections";
     private const string PluginMarkerOverview = "[FolderCollections]";
-
-    /// <summary>
-    /// 用于从文件夹名中提取 #XX 标记的正则.
-    /// 匹配 # 后面所有非空白、非 # 的字符（支持括号、减号、点号等）.
-    /// </summary>
-    private static readonly Regex TagPattern = new(@"#([^\s#]+)", RegexOptions.Compiled);
-
     private readonly ILibraryManager _libraryManager;
     private readonly ICollectionManager _collectionManager;
     private readonly ILogger<FolderCollectionService> _logger;
@@ -74,6 +67,39 @@ public class FolderCollectionService
     public async Task ScanAndCreateCollectionsAsync(PluginConfiguration config)
     {
         _logger.LogInformation("开始扫描文件夹集合...");
+
+        // 根据配置动态构建标签匹配正则
+        var patterns = new List<string>();
+        if (config.TagHashEnabled)
+        {
+            patterns.Add(@"#([^\s#]+)");
+        }
+
+        if (config.TagBraceEnabled)
+        {
+            patterns.Add(@"\{([^}\s]+)\}");
+        }
+
+        if (config.TagSquareBracketEnabled)
+        {
+            patterns.Add(@"\[([^\]\n]+)\]");
+        }
+
+        if (config.TagChineseBracketEnabled)
+        {
+            patterns.Add(@"【([^】\n]+)】");
+        }
+
+        Regex? tagPattern = null;
+        if (patterns.Count > 0)
+        {
+            tagPattern = new Regex(string.Join("|", patterns), RegexOptions.Compiled);
+            _logger.LogInformation("标签提取已启用，共 {Count} 种格式。", patterns.Count);
+        }
+        else
+        {
+            _logger.LogInformation("标签提取已禁用，本次扫描不会提取任何标签。");
+        }
 
         var allCollectionNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
@@ -256,26 +282,31 @@ public class FolderCollectionService
                     itemIds.Add(item.Id);
                 }
 
-                // 从所有层级的文件夹名中提取 #XX 标签
-                if (folderRelative.Contains('#', StringComparison.Ordinal))
+                // 从所有层级的文件夹名中提取标签（#XX、{XX}、[XX]、【XX】）
+                if (!groupTags.TryGetValue(collectionName, out var tagSet))
                 {
-                    if (!groupTags.TryGetValue(collectionName, out var tagSet))
-                    {
-                        tagSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                        groupTags[collectionName] = tagSet;
-                    }
+                    tagSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    groupTags[collectionName] = tagSet;
+                }
 
+                if (tagPattern != null)
+                {
                     foreach (var part in parts)
                     {
-                        foreach (Match m in TagPattern.Matches(part))
+                        foreach (Match m in tagPattern.Matches(part))
                         {
-                            if (m.Groups.Count > 1 && !string.IsNullOrEmpty(m.Groups[1].Value))
+                            for (int g = 1; g < m.Groups.Count; g++)
                             {
-                                tagSet.Add(m.Groups[1].Value);
+                                if (m.Groups[g].Success && !string.IsNullOrEmpty(m.Groups[g].Value))
+                                {
+                                    tagSet.Add(m.Groups[g].Value);
+                                    break;
+                                }
                             }
                         }
                     }
                 }
+
             }
 
             _logger.LogInformation(
@@ -398,8 +429,14 @@ public class FolderCollectionService
                 if (toAdd.Length == 0 && toRemove.Length == 0)
                 {
                     // 内容无变化，但仍尝试更新封面和元数据（补齐历史遗留的标记）
-                    await TrySetCollectionCoverAsync(existing, itemIds).ConfigureAwait(false);
-                    await SyncCollectionMetadataAsync(existing, customTags).ConfigureAwait(false);
+                    bool coverChanged = await TrySetCollectionCoverAsync(existing, itemIds).ConfigureAwait(false);
+                    bool metadataChanged = await SyncCollectionMetadataAsync(existing, customTags).ConfigureAwait(false);
+
+                    // 只要封面或元数据发生了变化，也算作"更新"
+                    if (coverChanged || metadataChanged)
+                    {
+                        return CollectionOperationResult.Updated;
+                    }
 
                     return CollectionOperationResult.Unchanged;
                 }
@@ -528,8 +565,8 @@ public class FolderCollectionService
     /// </summary>
     /// <param name="collection">集合对象.</param>
     /// <param name="customTags">从文件夹中提取的自定义标签.</param>
-    /// <returns>异步任务.</returns>
-    private async Task SyncCollectionMetadataAsync(BaseItem collection, HashSet<string> customTags)
+    /// <returns>是否发生了元数据变化.</returns>
+    private async Task<bool> SyncCollectionMetadataAsync(BaseItem collection, HashSet<string> customTags)
     {
         bool needsUpdate = false;
 
@@ -574,21 +611,15 @@ public class FolderCollectionService
 
         if (!needsUpdate)
         {
-            return;
+            return false;
         }
 
-        try
-        {
-            await collection.UpdateToRepositoryAsync(
-                ItemUpdateType.MetadataEdit,
-                CancellationToken.None).ConfigureAwait(false);
+        await collection.UpdateToRepositoryAsync(
+            ItemUpdateType.MetadataEdit,
+            CancellationToken.None).ConfigureAwait(false);
 
-            _logger.LogInformation("已同步并锁定集合 \"{Name}\" 的元数据。", collection.Name);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "保存集合 \"{Name}\" 元数据时出错。", collection.Name);
-        }
+        _logger.LogInformation("已同步并锁定集合 \"{Name}\" 的元数据。", collection.Name);
+        return true;
     }
 
     /// <summary>
@@ -597,13 +628,13 @@ public class FolderCollectionService
     /// </summary>
     /// <param name="collection">集合对象.</param>
     /// <param name="itemIds">集合内的媒体项 ID 列表（按顺序，第一个有封面的会被选中）.</param>
-    /// <returns>异步任务.</returns>
-    private async Task TrySetCollectionCoverAsync(BaseItem collection, List<Guid> itemIds)
+    /// <returns>是否发生了封面变化.</returns>
+    private async Task<bool> TrySetCollectionCoverAsync(BaseItem collection, List<Guid> itemIds)
     {
         // 如果集合已有 Primary 图，跳过
         if (collection.HasImage(ImageType.Primary, 0))
         {
-            return;
+            return false;
         }
 
         foreach (var id in itemIds)
@@ -642,13 +673,16 @@ public class FolderCollectionService
                     collection.Name,
                     item.Name);
 
-                return;
+                return true;
             }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "为集合 \"{Name}\" 设置封面时出错。", collection.Name);
             }
         }
+
+        // 没有找到可用的封面
+        return false;
     }
 
     private static bool IsPluginCollection(BaseItem item)

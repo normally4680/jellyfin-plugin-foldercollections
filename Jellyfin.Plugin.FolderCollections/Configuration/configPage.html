@@ -53,6 +53,44 @@
                         </div>
                     </div>
 
+                    <br />
+                    <h3>标签提取</h3>
+                    <div class="fieldDescription" style="margin-bottom: 10px;">
+                        开启后，插件会从文件夹名中提取标记作为集合标签，方便在 Jellyfin 中筛选。
+                    </div>
+
+                    <div class="checkboxContainer">
+                        <label>
+                            <input type="checkbox" id="chkTagHash" is="emby-checkbox" />
+                            <span>提取 #XX 形式的标签</span>
+                        </label>
+                        <div class="fieldDescription">例如文件夹名 "视频 #教程 #入门" 会提取出标签 "教程"、"入门"。</div>
+                    </div>
+
+                    <div class="checkboxContainer">
+                        <label>
+                            <input type="checkbox" id="chkTagBrace" is="emby-checkbox" />
+                            <span>提取 {XX} 形式的标签</span>
+                        </label>
+                        <div class="fieldDescription">例如文件夹名 "视频 {教程}" 会提取出标签 "教程"。</div>
+                    </div>
+
+                    <div class="checkboxContainer">
+                        <label>
+                            <input type="checkbox" id="chkTagSquareBracket" is="emby-checkbox" />
+                            <span>提取 [XX] 形式的标签</span>
+                        </label>
+                        <div class="fieldDescription">例如文件夹名 "视频 [教程]" 会提取出标签 "教程"。</div>
+                    </div>
+
+                    <div class="checkboxContainer">
+                        <label>
+                            <input type="checkbox" id="chkTagChineseBracket" is="emby-checkbox" />
+                            <span>提取 【XX】 形式的标签</span>
+                        </label>
+                        <div class="fieldDescription">例如文件夹名 "视频 【教程】" 会提取出标签 "教程"。</div>
+                    </div>
+
                     <div class="inputContainer">
                         <label class="inputLabel" for="txtMaxNameLength">集合名最大字符长度（0=不限制）</label>
                         <input id="txtMaxNameLength" type="number" is="emby-input" min="0" max="200" />
@@ -96,6 +134,10 @@
                             document.querySelector('#chkOverwriteExisting').checked = config.OverwriteExisting;
                             document.querySelector('#chkScanOnStartup').checked = config.ScanOnStartup;
                             document.querySelector('#chkRemoveObsolete').checked = config.RemoveObsoleteCollections !== false;
+                            document.querySelector('#chkTagHash').checked = config.TagHashEnabled !== false;
+                            document.querySelector('#chkTagBrace').checked = config.TagBraceEnabled !== false;
+                            document.querySelector('#chkTagSquareBracket').checked = config.TagSquareBracketEnabled !== false;
+                            document.querySelector('#chkTagChineseBracket').checked = config.TagChineseBracketEnabled !== false;
                             document.querySelector('#txtMaxNameLength').value = config.MaxNameLength || 0;
                             document.querySelector('#chkAutoSync').checked = config.AutoSyncAfterLibraryScan !== false;
                             FolderCollectionsConfigPage.renderLibraries(config.SelectedLibraryIds || []);
@@ -132,6 +174,10 @@
                             config.OverwriteExisting = document.querySelector('#chkOverwriteExisting').checked;
                             config.ScanOnStartup = document.querySelector('#chkScanOnStartup').checked;
                             config.RemoveObsoleteCollections = document.querySelector('#chkRemoveObsolete').checked;
+                            config.TagHashEnabled = document.querySelector('#chkTagHash').checked;
+                            config.TagBraceEnabled = document.querySelector('#chkTagBrace').checked;
+                            config.TagSquareBracketEnabled = document.querySelector('#chkTagSquareBracket').checked;
+                            config.TagChineseBracketEnabled = document.querySelector('#chkTagChineseBracket').checked;
                             config.MaxNameLength = parseInt(document.querySelector('#txtMaxNameLength').value) || 0;
                             config.AutoSyncAfterLibraryScan = document.querySelector('#chkAutoSync').checked;
                             ApiClient.updatePluginConfiguration(pluginId, config).then(function () {

@@ -41,4 +41,23 @@ public class PluginConfiguration : BasePluginConfiguration
     /// </summary>
     public bool AutoSyncAfterLibraryScan { get; set; } = true;
 
+    /// <summary>
+    /// Gets or sets a value indicating whether 提取 #XX 形式的标签.
+    /// </summary>
+    public bool TagHashEnabled { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether 提取 {XX} 形式的标签.
+    /// </summary>
+    public bool TagBraceEnabled { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether 提取 [XX] 形式的标签.
+    /// </summary>
+    public bool TagSquareBracketEnabled { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether 提取 【XX】 形式的标签.
+    /// </summary>
+    public bool TagChineseBracketEnabled { get; set; } = true;
 }
