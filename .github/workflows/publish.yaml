@@ -1,18 +1,84 @@
 name: '🚀 Publish Plugin'
 
 on:
-  release:
-    types:
-      - released
-  workflow_dispatch:
+  push:
+    tags:
+      - 'v*' # 当你推送类似 v1.0.0.0 的标签时触发
+
+permissions:
+  contents: write # 必须开启写权限，才能创建 Release
 
 jobs:
-  call:
-    uses: jellyfin/jellyfin-meta-plugins/.github/workflows/publish.yaml@master
-    with:
-      version: ${{ github.event.release.tag_name }}
-      is-unstable: ${{ github.event.release.prerelease }}
-    secrets:
-      deploy-host: ${{ secrets.DEPLOY_HOST }}
-      deploy-user: ${{ secrets.DEPLOY_USER }}
-      deploy-key: ${{ secrets.DEPLOY_KEY }}
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install JPRM
+        run: pip install jprm
+
+      - name: Build Plugin
+        run: |
+          # 复制配置文件并创建输出目录
+          cp build.yaml Jellyfin.Plugin.FolderCollections/build.yaml
+          mkdir -p ./artifacts
+          
+          # 获取版本号 (去除前面的v，例如 v1.0.0.0 -> 1.0.0.0)
+          VERSION=${GITHUB_REF_NAME#v}
+          
+          # 执行打包
+          cd Jellyfin.Plugin.FolderCollections
+          jprm plugin build . --dotnet-framework net8.0 --dotnet-configuration Release --version $VERSION --output ${{ github.workspace }}/artifacts
+
+      - name: Generate manifest.json
+        run: |
+          # 获取构建生成的 zip 文件信息
+          ZIP_FILE=$(ls ${{ github.workspace }}/artifacts/*.zip | head -n 1)
+          ZIP_NAME=$(basename $ZIP_FILE)
+          CHECKSUM=$(md5sum $ZIP_FILE | awk '{ print $1 }')
+          VERSION=${GITHUB_REF_NAME#v}
+          REPO_URL="https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}"
+
+          # ⚠️ 注意：下面的 guid 必须换成你 Plugin.cs 里自己生成的那个全新 GUID！
+          # 下面的 owner 和 name 也请根据自己的实际情况核对一下
+          cat <<EOF > ${{ github.workspace }}/artifacts/manifest.json
+          [
+            {
+              "guid": "3f2504e0-4f89-11d3-9a0c-0305e82c3301",
+              "name": "Folder Collections",
+              "description": "This is a longer description that can span more than one line.",
+              "overview": "Short description about your plugin.",
+              "owner": "normally4680",
+              "category": "General",
+              "versions": [
+                {
+                  "version": "$VERSION",
+                  "changelog": "Release $VERSION",
+                  "targetAbi": "10.9.0.0",
+                  "sourceUrl": "$REPO_URL/$ZIP_NAME",
+                  "checksum": "$CHECKSUM",
+                  "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+                }
+              ]
+            }
+          ]
+          EOF
+
+      - name: Create Release and Upload Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ github.workspace }}/artifacts/*.zip
+            ${{ github.workspace }}/artifacts/manifest.json
+          generate_release_notes: true
