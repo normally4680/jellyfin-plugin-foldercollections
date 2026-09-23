@@ -1,425 +1,293 @@
-# So you want to make a Jellyfin plugin
+```markdown
+# Jellyfin Folder Collections
 
-Awesome! This guide is for you. Jellyfin plugins are written using the dotnet standard framework. What that means is you can write them in any language that implements the CLI or the DLI and can compile to net8.0. The examples on this page are in C# because that is what most of Jellyfin is written in, but F#, Visual Basic, and IronPython should all be compatible once compiled.
+[![Jellyfin](https://img.shields.io/badge/Jellyfin-10.10.7-blue)](https://jellyfin.org)
+[![.NET](https://img.shields.io/badge/.NET-8.0-purple)](https://dotnet.microsoft.com)
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-## 0. Things you need to get started
+一个 Jellyfin 插件，根据物理文件夹结构自动生成媒体集合。适合个人媒体库、无刮削资源的分类整理，让 Jellyfin 的搜索能够按文件夹结构精准定位内容。
 
-- [Dotnet SDK 9.0](https://dotnet.microsoft.com/en-us/download/dotnet)
+---
 
-- An editor of your choice. Some free choices are:
+## ✨ 功能特性
 
-   [Visual Studio Code](https://code.visualstudio.com)
+### 核心功能
 
-   [Visual Studio Community Edition](https://visualstudio.microsoft.com/downloads)
+- **文件夹结构驱动**：扫描媒体库的物理文件夹，自动为每个文件夹生成一个 Jellyfin 集合。
+- **多级路径拼接**：支持深层嵌套，例如 `Captures\2024\春节\video.mp4` 会生成集合 `Captures-2024-春节`。
+- **超长名称保护**：当拼接后的集合名超过设定长度时，使用 MD5 哈希后缀保证唯一性，避免不同文件夹被错误合并。
+- **增量同步**：每次扫描对比差异，只新增或移除变化的媒体项，不做全量重建，性能友好。
+- **自动清理**：媒体库中删除的文件夹，其对应的集合会在下次扫描时自动清理（仅删除插件自己创建的集合，不会误删手动创建的）。
 
-   [Mono Develop](https://www.monodevelop.com)
+### 标签系统
 
-## 0.5. Quickstarts
+- **从文件夹名提取标签**：支持 4 种标记格式，每种可独立开关：
+  - `#标签` — 例如 `视频 #教程 #入门`
+  - `{标签}` — 例如 `视频 {教程}`
+  - `[标签]` — 例如 `视频 [教程]`
+  - `【标签】` — 例如 `视频 【教程】`
+- **自动更新**：文件夹名变化时，集合标签同步更新。
+- **标签可用于筛选**：在 Jellyfin 集合页面可以按标签筛选集合。
 
-We have a number of quickstart options available to speed you along the way.
+### 封面管理
 
-- [Download the Example Plugin Project](https://github.com/jellyfin/jellyfin-plugin-template/tree/master/Jellyfin.Plugin.FolderCollections) from this repository, open it in your IDE and go to [step 3](https://github.com/jellyfin/jellyfin-plugin-template#3-customize-plugin-information)
+- **自动封面**：集合创建时，自动取集合内第一个有缩略图的视频作为集合封面。
+- **不覆盖已有封面**：如果你手动为集合设置过封面，插件不会替换。
 
-- Install our dotnet template by [downloading the dotnet-template/content folder from this repo](https://github.com/jellyfin/jellyfin-plugin-template/tree/master/dotnet-template/content) or off of Nuget (Coming soon)
+### 性能与稳定性
 
-   ```shell
-   dotnet new -i /path/to/templatefolder
+- **分页查询**：分批从数据库读取媒体项，避免大数据量（数万甚至数十万）下的查询截断问题。
+- **元数据锁定**：集合创建后自动锁定元数据，避免 Jellyfin 触发 TMDb 等在线服务请求导致扫描卡顿。
+- **可观测日志**：每一步操作都有清晰的日志，方便排查问题。
+
+### 触发方式
+
+- **手动触发**：在插件设置页面点击"立即扫描"。
+- **自动触发**：媒体库扫描完成后自动同步集合（可关闭）。
+
+### 配置页面
+
+提供完整的 Web 配置页面：
+
+- 选择需要扫描的媒体库
+- 覆盖模式（清空重建 vs 增量同步）
+- 自动删除过时集合
+- 媒体库扫描后自动同步
+- 集合名最大字符长度
+- 4 种标签格式的独立开关
+
+---
+
+## 🖥️ 环境要求
+
+| 项目 | 要求 |
+|------|------|
+| **Jellyfin** | 10.10.7 |
+| **.NET SDK** | 8.0 或更高 |
+| **操作系统** | Windows / Linux / macOS（推荐 Windows，长路径支持更完备） |
+
+---
+
+## 📦 安装
+
+### 从发布包安装
+
+1. 从 [Releases](https://github.com/yourname/jellyfin-plugin-foldercollections/releases) 页面下载最新版本。
+2. 在 Jellyfin 数据目录下找到 `plugins` 文件夹（Windows 通常为 `%LOCALAPPDATA%\jellyfin\plugins` 或 `%ProgramData%\Jellyfin\Server\plugins`）。
+3. 创建子文件夹 `FolderCollections`，把 DLL 和 `meta.json` 复制进去：
    ```
-
-- Run this command then skip to step 4
-
-   ```shell
-      dotnet new Jellyfin-plugin -name MyPlugin
+   plugins/
+   └── FolderCollections/
+       ├── Jellyfin.Plugin.FolderCollections.dll
+       └── meta.json
    ```
+4. 重启 Jellyfin。
 
-If you'd rather start from scratch keep going on to step one. This assumes no specific editor or IDE and requires only the command line with dotnet in the path.
+### 从源码编译
 
-## 1. Initialize Your Project
+```bash
+# 克隆项目
+git clone https://github.com/yourname/jellyfin-plugin-foldercollections.git
+cd jellyfin-plugin-foldercollections
 
-Make a new dotnet standard project with the following command, it will make a directory for itself.
+# 编译
+dotnet build -c Release
 
-```shell
-dotnet new classlib -f net9.0 -n MyJellyfinPlugin
+# 编译输出在 bin/Release/net8.0/
 ```
 
-Now add the Jellyfin shared libraries.
+---
 
-```shell
-dotnet add package Jellyfin.Model
-dotnet add package Jellyfin.Controller
+## 🚀 使用
+
+### 1. 配置媒体库
+
+进入 Jellyfin 控制台 → 插件 → **Folder Collections** → 设置：
+
+1. 在"选择需要扫描的媒体库"中勾选需要生成集合的媒体库。
+2. 根据需求调整选项：
+   - **覆盖已存在的同名集合**：勾选后每次扫描会完全重建集合。日常使用建议不勾选，走增量同步。
+   - **自动删除不再需要的集合**：当媒体库中删除文件夹后，自动清理对应的集合。
+   - **媒体库扫描完成后自动同步集合**：Jellyfin 扫描媒体库后自动触发插件。
+   - **集合名最大字符长度**：超过后使用哈希后缀。推荐 80。
+   - **标签提取开关**：按需启用 4 种标签格式。
+3. 点击"保存配置"。
+
+### 2. 触发扫描
+
+两种方式：
+
+- **手动**：在插件设置页面点击"立即扫描"。
+- **自动**：Jellyfin 媒体库扫描结束后自动触发（需在设置中开启）。
+
+### 3. 查看结果
+
+在 Jellyfin 首页 → **集合** 页面可以看到生成的集合。
+
+> 💡 **提示**：集合页面的前端缓存有 10-30 秒延迟，Ctrl+R 可立即刷新。
+
+---
+
+## 📁 目录结构示例
+
+假设媒体库根路径为 `D:\Videos`，结构如下：
+
+```
+D:\Videos\
+├── 电影\
+│   ├── 科幻\
+│   │   ├── 星际穿越.mp4
+│   │   └── 盗梦空间.mp4
+│   └── 动作\
+│       └── 复仇者联盟.mp4
+└── 教程\
+    └── 【Python】入门\
+        ├── 01-基础.mp4
+        └── 02-进阶.mp4
 ```
 
-You have an autogenerated Class1.cs file. You won't be needing this, so go ahead and delete it.
+插件会生成以下集合：
 
-Navigate to the csproj that was generated, and ensure that you modify the package references to exclude assets, so that unnecessary files aren't copied over.
-Skipping this step will prevent your plugin from registering correctly.
+| 集合名 | 包含媒体 |
+|--------|---------|
+| `电影-科幻` | 星际穿越、盗梦空间 |
+| `电影-动作` | 复仇者联盟 |
+| `教程-【Python】入门` | 01-基础、02-进阶 |
 
-```xml
-<ItemGroup>
-    <PackageReference Include="Jellyfin.Controller" Version="10.11.5">
-        <ExcludeAssets>runtime</ExcludeAssets>
-    </PackageReference>
-    <PackageReference Include="Jellyfin.Model" Version="10.11.5">
-        <ExcludeAssets>runtime</ExcludeAssets>
-    </PackageReference>
-</ItemGroup>
+标签提取结果：
+
+| 集合 | 标签 |
+|------|------|
+| `电影-科幻` | `FolderCollections` |
+| `电影-动作` | `FolderCollections` |
+| `教程-【Python】入门` | `FolderCollections`、`Python` |
+
+---
+
+## ⚙️ 技术细节
+
+### 架构
+
+- **依赖注入**：使用 `IPluginServiceRegistrator` 注册服务。
+- **媒体库查询**：分批查询 `InternalItemsQuery`，避免大规模媒体库的截断问题。
+- **路径匹配**：根据 `PhysicalLocations` 前缀匹配媒体项，不依赖 `ParentId` 关系，稳定性更高。
+- **元数据持久化**：使用 `BaseItem.UpdateToRepositoryAsync` 保存标签、锁定状态、封面。
+- **集合成员读取**：使用 `Folder.GetLinkedChildren()` 读取集合成员（Jellyfin 10.x 标准方式）。
+
+### 集合识别标记
+
+插件创建的集合会带上以下标记，用于区分手动创建的集合：
+
+- **标签**：`FolderCollections`
+- **简介**：包含 `[FolderCollections]` 前缀
+- **兜底规则**：集合名包含 `-` 且长度 > 8（用于兼容早期版本创建的集合）
+
+清理逻辑只处理带这些标记的集合，不会误删手动创建的集合。
+
+### 关键类
+
+| 类 | 作用 |
+|----|------|
+| `Plugin` | 插件主类 |
+| `PluginConfiguration` | 配置数据模型 |
+| `FolderCollectionService` | 核心扫描与集合生成逻辑 |
+| `FolderCollectionPostScanTask` | 媒体库扫描后置任务 |
+| `FolderCollectionsController` | REST API 端点（手动触发扫描） |
+| `PluginServiceRegistrator` | 依赖注入注册 |
+
+### REST API
+
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/FolderCollections/Scan` | POST | 触发一次扫描 |
+
+---
+
+## 🪵 日志说明
+
+插件日志前缀为 `Jellyfin.Plugin.FolderCollections.Services.FolderCollectionService`。
+
+### 典型日志
+
+```
+开始扫描文件夹集合...
+第 1 批获取 5000 条（新增 5000 条，去重后累计 5000 条）。
+...
+全库共查询到 78398 个候选媒体项（按 Id 去重后），准备按媒体库路径筛选...
+媒体库 "家庭视频和照片" 物理位置: [D:\Videos]
+正在处理媒体库: "家庭视频和照片"
+媒体库 "家庭视频和照片" 共匹配到 78398 个媒体项。
+媒体库 "家庭视频和照片" 扫描完成：共生成 457 个集合分组。
+  集合 "电影-科幻" ← 2 个媒体项，标签: [FolderCollections]
+  集合 "教程-【Python】入门" ← 2 个媒体项，标签: [FolderCollections, Python]
+...
+开始检查过时集合...
+删除过时集合: 电影-旧分类
+过时集合清理完成，共删除 1 个集合。
+本次扫描统计：新增集合 0 个，更新集合 5 个，删除集合 1 个，未变化 451 个，共涉及 2928 个媒体项。
+所有媒体库扫描完成。
 ```
 
-Note: Ensure the package reference version matches the install version of jellyfin server, otherwise the plugin will show as NotSupported.
+---
 
-## 2. Set Up the Basics
+## 🐛 故障排查
 
-There are a few mandatory classes you'll need for a plugin so we need to make them.
+### 集合显示 `NotSupported`
 
-### PluginConfiguration
+- 确认 DLL 是从 `bin/Release/net8.0/` 编译的（而不是 `net10.0`）。
+- 确认 `meta.json` 中 `targetAbi` 为 `10.10.7.0`。
 
-Create a folder named "Configuration", and a PluginConfiguration.cs file inside.
+### 集合数量远小于预期
 
-You can call it whatever you'd like really. This class is used to hold settings your plugin might need. We can leave it empty for now. This class should inherit from `MediaBrowser.Model.Plugins.BasePluginConfiguration`
+- 检查日志中 `媒体库 "..." 共匹配到 X 个媒体项` 的数字，与数据库中该媒体库的媒体项数量对比。
+- 使用 SQLite 工具（如 DB Browser for SQLite）打开 `library.db`，执行：
+  ```sql
+  SELECT COUNT(*) FROM TypedBaseItems 
+  WHERE Path LIKE '%你的文件夹名%';
+  ```
 
-It should look something like the following:
+### 集合没有封面或标签
 
-```csharp
-    using MediaBrowser.Model.Plugins;
+- 确认视频的缩略图已生成（Jellyfin 需要时间提取）。
+- 前端缓存问题，Ctrl+R 刷新。
+- 检查日志中是否有 `已同步并锁定集合` 的输出。
 
-    namespace MyJellyfinPlugin.Configuration;
-    class PluginConfiguration : BasePluginConfiguration
-    {
+### 扫描耗时长
 
-    }
+- 30TB 媒体库首次扫描可能需要几分钟到几十分钟，属正常现象。
+- 第二次及以后的扫描会快很多（增量同步）。
+- 关闭"媒体库扫描后自动同步"可以减少后台负载。
+
+---
+
+## 📄 许可证
+
+MIT License — 详见 [LICENSE](LICENSE)。
+
+---
+
+## 🤝 贡献
+
+欢迎提交 Issue 和 Pull Request。
+
+### 开发环境
+
+- .NET 8.0 SDK
+- Visual Studio 2022 / VS Code + C# Dev Kit
+- Jellyfin 10.10.7 测试服务器
+
+### 本地测试
+
+```bash
+dotnet build
+# 把 bin/Debug/net8.0/ 下的 DLL 复制到 Jellyfin 插件目录
+# 重启 Jellyfin 查看效果
 ```
 
-### Plugin
+---
 
-This is the main class for your plugin and will reside in the root of your project. It will define your name, version and Id. It should inherit from `MediaBrowser.Common.Plugins.BasePlugin<PluginConfiguration>`
+## 🙏 致谢
 
-It should look something like the following:
-
-```csharp
-    using MediaBrowser.Common.Plugins;
-    using MyJellyfinPlugin.Configuration;
-
-    namespace MyJellyfinPlugin;
-
-    class Plugin : BasePlugin<PluginConfiguration>
-    {
-
-    }
+- [Jellyfin](https://jellyfin.org) — 开源的媒体服务器
+- 所有贡献者和使用者
 ```
-
-Note: If you called your PluginConfiguration class something different, you need to put that between the <>
-
-### Implement Required Properties
-
-The Plugin class needs a few properties implemented before it can work correctly.
-
-It needs an override on ID, an override on Name, and a constructor that follows a specific model. To get started you can use the following section.
-
-```csharp
-public Plugin(IApplicationPaths applicationPaths, IXmlSerializer xmlSerializer) : base(applicationPaths, xmlSerializer){}
-public override string Name => throw new System.NotImplementedException();
-public override Guid Id => Guid.Parse("");
-```
-
-## 3. Customize Plugin Information
-
-You need to populate some of your plugin's information. Go ahead a put in a string of the Name you've overridden name, and generate a GUID
-
-- **Windows Users**: you can use the Powershell command `New-Guid`, `[guid]::NewGuid()` or the Visual Studio GUID generator
-
-- **Linux and OS X Users**: you can use the Powershell Core command `New-Guid` or this command from your shell of choice:
-
-   ```shell
-   od -x /dev/urandom | head -n1 | awk '{OFS="-"; srand($6); sub(/./,"4",$5); sub(/./,substr("89ab",1+rand()*4,1),$6); print $2$3,$4,$5,$6,$7$8$9}'
-   ```
-
-or
-
-   ```shell
-   uuidgen
-   ```
-
-- Place that guid inside the `Guid.Parse("")` quotes to define your plugin's ID.
-
-## 4. Adding Functionality
-
-Congratulations, you now have everything you need for a perfectly functional functionless Jellyfin plugin! You can try it out right now if you'd like by compiling it, then placing the dll you generate in a subfolder (named after your plugin for example) within the plugins folder under your Jellyfin directory (Normally C:\Users\{YourUserName}\AppData\Local\jellyfin\plugins). If you want to try and hook it up to a debugger make sure you copy the generated PDB file alongside it.
-
-Most people aren't satisfied with just having an entry in a menu for their plugin, most people want to have some functionality, so lets look at how to add it.
-
-### 4a. Implement Interfaces
-
-If the functionality you are trying to add is functionality related to something that Jellyfin has an interface for you're in luck. Jellyfin uses some automatic discovery and injection to allow any interfaces you implement in your plugin to be available in Jellyfin.
-
-Here's some interfaces you could implement for common use cases:
-
-- **IAuthenticationProvider** - Allows you to add an authentication provider that can authenticate a user based on a name and a password, but that doesn't expect to deal with local users.
-- **IBaseItemComparer** - Allows you to add sorting rules for dealing with media that will show up in sort menus
-- **IIntroProvider** - Allows you to play a piece of media before another piece of media (i.e. a trailer before a movie, or a network bumper before an episode of a show)
-- **IItemResolver** - Allows you to define custom media types
-- **ILibraryPostScanTask** - Allows you to define a task that fires after scanning a library
-- **IMetadataSaver** - Allows you to define a metadata standard that Jellyfin can use to write metadata
-- **IResolverIgnoreRule** - Allows you to define subpaths that are ignored by media resolvers for use with another function (i.e. you wanted to have a theme song for each tv series stored in a subfolder that could be accessed by your plugin for playback in a menu).
-- **IScheduledTask** - Allows you to create a scheduled task that will appear in the scheduled task lists on the dashboard.
-
-There are loads of other interfaces that can be used, but you'll need to poke around the API to get some info. If you're an expert on a particular interface, you should help [contribute some documentation](https://docs.jellyfin.org/general/contributing/index.html)!
-
-### 4b. Use plugin aimed interfaces to add custom functionality
-
-If your plugin doesn't fit perfectly neatly into a predefined interface, never fear, there are a set of interfaces and classes that allow your plugin to extend Jellyfin any which way you please. Here's a quick overview on how to use them
-
-- **IPluginConfigurationPage** - Allows you to have a plugin config page on the dashboard. If you used one of the quickstart example projects, a premade page with some useful components to work with has been created for you! If not you can check out this guide here for how to whip one up.
-
- **IPluginServiceRegistrator** - Will be located by Jellyfin at server startup and allows you to add services to the DI container to allow for injection in your plugin's classes later.
-
-- **IHostedService** - Allows you to run code as a background task that will be started at program startup and will remain in memory. See [Microsoft's documentation](https://learn.microsoft.com/en-us/aspnet/core/fundamentals/host/hosted-services?view=aspnetcore-9.0&tabs=visual-studio#ihostedservice-interface) for more information. You can make as many of these as you need; make Jellyfin aware of them with an `IPluginServiceRegistrator`. It is wildly useful for loading configs or persisting state. **Be aware that your main plugin class (IBasePlugin) cannot also be a IHostedService.**
-
-- **ControllerBase** - Allows you to define custom REST-API endpoints. This is the default ASP.NET Web-API controller. You can use it exactly as you would in a normal Web-API project. Learn more about it [here](https://docs.microsoft.com/aspnet/core/web-api/?view=aspnetcore-9.0).
-
-Likewise you might need to get data and services from the Jellyfin core, Jellyfin provides a number of interfaces you can add as parameters to your plugin constructor which are then made available in your project (you can see the 2 mandatory ones that are needed by the plugin system in the constructor as is).
-
-- **IBlurayExaminer** - Allows you to examine blu-ray folders
-- **IDtoService** - Allows you to create data transport objects, presumably to send to other plugins or to the core
-- **ILibraryManager** - Allows you to directly access the media libraries without hopping through the API
-- **ILocalizationManager** - Allows you tap into the main localization engine which governs translations, rating systems, units etc...
-- **INetworkManager** - Allows you to get information about the server's networking status
-- **IServerApplicationPaths** - Allows you to get the running server's paths
-- **IServerConfigurationManager** - Allows you to write or read server configuration data into the application paths
-- **ITaskManager** - Allows you to execute and manipulate scheduled tasks
-- **IUserManager** - Allows you to retrieve user info and user library related info
-- **IXmlSerializer** - Allows you to use the main xml serializer
-- **IZipClient** - Allows you to use the core zip client for compressing and decompressing data
-
-## 5. Create a Repository
-
-- [See blog post](https://jellyfin.org/posts/plugin-updates/)
-
-## 6. Set Up Debugging
-
-Debugging can be set up by creating tasks which will be executed when running the plugin project. The specifics on setting up these tasks are not included as they may differ from IDE to IDE. The following list describes the general process:
-
-- Compile the plugin in debug mode.
-- Create the plugin directory if it doesn't exist.
-- Copy the plugin into your server's plugin directory. The server will then execute it.
-- Make sure to set the working directory of the program being debugged to the working directory of the Jellyfin Server.
-- Start the server.
-
-Some IDEs like Visual Studio Code may need the following compile flags to compile the plugin:
-
-```shell
-dotnet build Your-Plugin.sln /property:GenerateFullPaths=true /consoleloggerparameters:NoSummary
-```
-
-These flags generate the full paths for file names and **do not** generate a summary during the build process as this may lead to duplicate errors in the problem panel of your IDE.
-
-### 6.a Set Up Debugging on Visual Studio
-
-Visual Studio allows developers to connect to other processes and debug them, setting breakpoints and inspecting the variables of the program. We can set this up following this steps:
-On this section we will explain how to set up our solution to enable debugging before the server starts.
-
-1. Right-click on the solution, And click on Add -> Existing Project...
-2. Locate Jellyfin executable in your installation folder and click on 'Open'. It is called `Jellyfin.exe`. Now The solution will have a new "Project" called Jellyfin. This is the executable, not the source code of Jellyfin.
-3. Right-click on this new project and click on 'Set up as Startup Project'
-4. Right-click on this new project and click on 'Properties'
-5. Make sure that the 'Attach' parameter is set to 'No'
-
-From now on, everytime you click on start from Visual Studio, it will start Jellyfin attached to the debugger!
-
-The only thing left to do is to compile the project as it is specified a few lines above and you are done.
-
-### 6.b Automate the Setup on Visual Studio Code
-
-Visual Studio Code allows developers to automate the process of starting all necessary dependencies to start debugging the plugin. This guide assumes the reader is familiar with the [documentation on debugging in Visual Studio Code](https://code.visualstudio.com/docs/editor/debugging) and has read the documentation in this file. It is assumed that the Jellyfin Server has already been compiled once. However, should one desire to automatically compile the server before the start of the debugging session, this can be easily implemented, but is not further discussed here.
-
-A full example, which aims to be portable may be found in this repo's `.vscode` folder.
-
-This example expects you to clone `jellyfin`, `jellyfin-web` and `jellyfin-plugin-template` under the same parent directory, though you can customize this in `settings.json`
-
-1. Create a `settings.json` file inside your `.vscode` folder, to specify common options specific to your local setup.
-
-   ```jsonc
-    {
-        // jellyfinDir : The directory of the cloned jellyfin server project
-        // This needs to be built once before it can be used
-        "jellyfinDir"     : "${workspaceFolder}/../jellyfin/Jellyfin.Server",
-        // jellyfinWebDir : The directory of the cloned jellyfin-web project
-        // This needs to be built once before it can be used
-        "jellyfinWebDir"  : "${workspaceFolder}/../jellyfin-web",
-        // jellyfinDataDir : the root data directory for a running jellyfin instance
-        // This is where jellyfin stores its configs, plugins, metadata etc
-        // This is platform specific by default, but on Windows defaults to
-        // ${env:LOCALAPPDATA}/jellyfin
-        "jellyfinDataDir" : "${env:LOCALAPPDATA}/jellyfin",
-        // The name of the plugin
-        "pluginName" : "Jellyfin.Plugin.FolderCollections",
-    }
-   ```
-
-1. To automate the launch process, create a new `launch.json` file for C# projects inside the `.vscode` folder. The example below shows only the relevant parts of the file. Adjustments to your specific setup and operating system may be required.
-
-   ```jsonc
-    {
-        // Paths and plugin names are configured in settings.json
-        "version": "0.2.0",
-        "configurations": [
-            {
-                "type": "coreclr",
-                "name": "Launch",
-                "request": "launch",
-                "preLaunchTask": "build-and-copy",
-                "program": "${config:jellyfinDir}/bin/Debug/net8.0/jellyfin.dll",
-                "args": [
-                //"--nowebclient"
-                "--webdir",
-                "${config:jellyfinWebDir}/dist/"
-                ],
-                "cwd": "${config:jellyfinDir}",
-            }
-        ]
-    }
-
-   ```
-
-   The `request` type is specified as `launch`, as this `launch.json` file will start the Jellyfin Server process. The `preLaunchTask` defines a task that will run before the Jellyfin Server starts. More on this later. It is important to set the `program` path to the Jellyin Server program and set the current working directory (`cwd`) to the working directory of the Jellyfin Server.
-   The `args` option allows to specify arguments to be passed to the server, e.g. whether Jellyfin should start with the web-client or without it.
-
-2. Create a `tasks.json` file inside your `.vscode` folder and specify a `build-and-copy` task that will run in `sequence` order. This tasks depends on multiple other tasks and all of those other tasks can be defined as simple `shell` tasks that run commands like the `cp` command to copy a file. The sequence to run those tasks in is given below. Please note that it might be necessary to adjust the examples for your specific setup and operating system.
-
-   The full file is shown here - Specific sections will be discussed in depth
-
-    ```jsonc
-    {
-        // Paths and plugin name are configured in settings.json
-        "version": "2.0.0",
-        "tasks": [
-            {
-            // A chain task - build the plugin, then copy it to your
-            // jellyfin server's plugin directory
-            "label": "build-and-copy",
-            "dependsOrder": "sequence",
-            "dependsOn": ["build", "make-plugin-dir", "copy-dll"]
-            },
-            {
-            // Build the plugin
-            "label": "build",
-            "command": "dotnet",
-            "type": "shell",
-            "args": [
-                "publish",
-                "${workspaceFolder}/${config:pluginName}.sln",
-                "/property:GenerateFullPaths=true",
-                "/consoleloggerparameters:NoSummary"
-            ],
-            "group": "build",
-            "presentation": {
-                "reveal": "silent"
-            },
-            "problemMatcher": "$msCompile"
-            },
-            {
-                // Ensure the plugin directory exists before trying to use it
-                "label": "make-plugin-dir",
-                "type": "shell",
-                "command": "mkdir",
-                "args": [
-                "-Force",
-                "-Path",
-                "${config:jellyfinDataDir}/plugins/${config:pluginName}/"
-                ]
-            },
-            {
-                // Copy the plugin dll to the jellyfin plugin install path
-                // This command copies every .dll from the build directory to the plugin dir
-                // Usually, you probablly only need ${config:pluginName}.dll
-                // But some plugins may bundle extra requirements
-                "label": "copy-dll",
-                "type": "shell",
-                "command": "cp",
-                "args": [
-                "./${config:pluginName}/bin/Debug/net8.0/publish/*",
-                "${config:jellyfinDataDir}/plugins/${config:pluginName}/"
-                ]
-
-            },
-        ]
-    }
-
-    ```
-
-    1.  The "build-and-copy" task which triggers all of the other tasks
-
-    ```jsonc
-        {
-        // A chain task - build the plugin, then copy it to your
-        // jellyfin server's plugin directory
-        "label": "build-and-copy",
-        "dependsOrder": "sequence",
-        "dependsOn": ["build", "make-plugin-dir", "copy-dll"]
-        },
-    ```
-
-    2.  A build task. This task builds the plugin without generating summary, but with full paths for file names enabled.
-
-        ```jsonc
-            {
-            // Build the plugin
-            "label": "build",
-            "command": "dotnet",
-            "type": "shell",
-            "args": [
-                "publish",
-                "${workspaceFolder}/${config:pluginName}.sln",
-                "/property:GenerateFullPaths=true",
-                "/consoleloggerparameters:NoSummary"
-            ],
-            "group": "build",
-            "presentation": {
-                "reveal": "silent"
-            },
-            "problemMatcher": "$msCompile"
-            },
-        ```
-
-    3.  A tasks which creates the necessary plugin directory and a sub-folder for the specific plugin. The plugin directory is located below the [data directory](https://jellyfin.org/docs/general/administration/configuration.html) of the Jellyfin Server. As an example, the following path can be used for the bookshelf plugin: `$HOME/.local/share/jellyfin/plugins/Bookshelf/`
-
-        ```jsonc
-            {
-                // Ensure the plugin directory exists before trying to use it
-                "label": "make-plugin-dir",
-                "type": "shell",
-                "command": "mkdir",
-                "args": [
-                "-Force",
-                "-Path",
-                "${config:jellyfinDataDir}/plugins/${config:pluginName}/"
-                ]
-            },
-        ```
-
-    4.  A tasks which copies the plugin dll which has been built in step 2.1. The file is copied into it's specific plugin directory within the server's plugin directory.
-
-        ```jsonc
-            {
-                // Copy the plugin dll to the jellyfin plugin install path
-                // This command copies every .dll from the build directory to the plugin dir
-                // Usually, you probablly only need ${config:pluginName}.dll
-                // But some plugins may bundle extra requirements
-                "label": "copy-dll",
-                "type": "shell",
-                "command": "cp",
-                "args": [
-                "./${config:pluginName}/bin/Debug/net8.0/publish/*",
-                "${config:jellyfinDataDir}/plugins/${config:pluginName}/"
-                ]
-            },
-        ```
-
-## Licensing
-
-Licensing is a complex topic. This repository features a GPLv3 license template that can be used to provide a good default license for your plugin. You may alter this if you like, but if you do a permissive license must be chosen.
-
-Due to how plugins in Jellyfin work, when your plugin is compiled into a binary, it will link against the various Jellyfin binary NuGet packages. These packages are licensed under the GPLv3. Thus, due to the nature and restrictions of the GPL, the binary plugin you get will also be licensed under the GPLv3.
-
-If you accept the default GPLv3 license from this template, all will be good. However if you choose a different license, please keep this fact in mind, as it might not always be obvious that an, e.g. MIT-licensed plugin would become GPLv3 when compiled.
-
-Please note that this also means making "proprietary", source-unavailable, or otherwise "hidden" plugins for public consumption is not permitted. To build a Jellyfin plugin for distribution to others, it must be under the GPLv3 or a permissive open-source license that can be linked against the GPLv3.
