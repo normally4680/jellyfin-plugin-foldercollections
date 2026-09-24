@@ -1,4 +1,3 @@
-```markdown
 # Jellyfin Folder Collections
 
 [![Jellyfin](https://img.shields.io/badge/Jellyfin-10.10.7-blue)](https://jellyfin.org)
