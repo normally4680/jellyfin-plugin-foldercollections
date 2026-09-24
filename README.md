@@ -86,7 +86,7 @@
 
 ```bash
 # 克隆项目
-git clone https://github.com/yourname/jellyfin-plugin-foldercollections.git
+git clone https://github.com/normally4680/jellyfin-plugin-foldercollections.git
 cd jellyfin-plugin-foldercollections
 
 # 编译
@@ -212,18 +212,18 @@ D:\Videos\
 开始扫描文件夹集合...
 第 1 批获取 5000 条（新增 5000 条，去重后累计 5000 条）。
 ...
-全库共查询到 78398 个候选媒体项（按 Id 去重后），准备按媒体库路径筛选...
+全库共查询到 70001 个候选媒体项（按 Id 去重后），准备按媒体库路径筛选...
 媒体库 "家庭视频和照片" 物理位置: [D:\Videos]
 正在处理媒体库: "家庭视频和照片"
-媒体库 "家庭视频和照片" 共匹配到 78398 个媒体项。
-媒体库 "家庭视频和照片" 扫描完成：共生成 457 个集合分组。
+媒体库 "家庭视频和照片" 共匹配到 70001 个媒体项。
+媒体库 "家庭视频和照片" 扫描完成：共生成 501 个集合分组。
   集合 "电影-科幻" ← 2 个媒体项，标签: [FolderCollections]
   集合 "教程-【Python】入门" ← 2 个媒体项，标签: [FolderCollections, Python]
 ...
 开始检查过时集合...
 删除过时集合: 电影-旧分类
 过时集合清理完成，共删除 1 个集合。
-本次扫描统计：新增集合 0 个，更新集合 5 个，删除集合 1 个，未变化 451 个，共涉及 2928 个媒体项。
+本次扫描统计：新增集合 0 个，更新集合 5 个，删除集合 1 个，未变化 495 个，共涉及 70001 个媒体项。
 所有媒体库扫描完成。
 ```
 
@@ -253,7 +253,7 @@ D:\Videos\
 
 ### 扫描耗时长
 
-- 30TB 媒体库首次扫描可能需要几分钟到几十分钟，属正常现象。
+- 首次扫描可能需要几分钟到几十分钟，取决于媒体库文件大小和数量多少，属正常现象。
 - 第二次及以后的扫描会快很多（增量同步）。
 - 关闭"媒体库扫描后自动同步"可以减少后台负载。
 
@@ -275,13 +275,6 @@ MIT License — 详见 [LICENSE](LICENSE)。
 - Visual Studio 2022 / VS Code + C# Dev Kit
 - Jellyfin 10.10.7 测试服务器
 
-### 本地测试
-
-```bash
-dotnet build
-# 把 bin/Debug/net8.0/ 下的 DLL 复制到 Jellyfin 插件目录
-# 重启 Jellyfin 查看效果
-```
 
 ---
 
@@ -289,4 +282,3 @@ dotnet build
 
 - [Jellyfin](https://jellyfin.org) — 开源的媒体服务器
 - 所有贡献者和使用者
-```
