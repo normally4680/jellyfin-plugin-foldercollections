@@ -91,6 +91,14 @@
                         <div class="fieldDescription">例如文件夹名 "视频 【教程】" 会提取出标签 "教程"。</div>
                     </div>
 
+                    <div class="checkboxContainer">
+                        <label>
+                            <input type="checkbox" id="TagAtEnabled" is="emby-checkbox" />
+                            <span>提取 @XX 形式的标签</span>
+                        </label>
+                        <div class="fieldDescription">例如文件夹名 "视频 @教程" 会提取出标签 "教程"。</div>
+                    </div>
+
                     <div class="inputContainer">
                         <label class="inputLabel" for="txtMaxNameLength">集合名最大字符长度（0=不限制）</label>
                         <input id="txtMaxNameLength" type="number" is="emby-input" min="0" max="200" />
@@ -140,6 +148,7 @@
                             document.querySelector('#chkTagChineseBracket').checked = config.TagChineseBracketEnabled !== false;
                             document.querySelector('#txtMaxNameLength').value = config.MaxNameLength || 0;
                             document.querySelector('#chkAutoSync').checked = config.AutoSyncAfterLibraryScan !== false;
+                            document.querySelector('#TagAtEnabled').checked = config.TagAtEnabled !== false;
                             FolderCollectionsConfigPage.renderLibraries(config.SelectedLibraryIds || []);
                             Dashboard.hideLoadingMsg();
                         });
@@ -180,6 +189,7 @@
                             config.TagChineseBracketEnabled = document.querySelector('#chkTagChineseBracket').checked;
                             config.MaxNameLength = parseInt(document.querySelector('#txtMaxNameLength').value) || 0;
                             config.AutoSyncAfterLibraryScan = document.querySelector('#chkAutoSync').checked;
+                            config.TagAtEnabled = document.querySelector('#TagAtEnabled').checked;
                             ApiClient.updatePluginConfiguration(pluginId, config).then(function () {
                                 Dashboard.processPluginConfigurationUpdateResult();
                             });

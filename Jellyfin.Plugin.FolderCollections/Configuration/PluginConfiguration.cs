@@ -60,4 +60,9 @@ public class PluginConfiguration : BasePluginConfiguration
     /// Gets or sets a value indicating whether 提取 【XX】 形式的标签.
     /// </summary>
     public bool TagChineseBracketEnabled { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether 提取 @XX 形式的标签.
+    /// </summary>
+    public bool TagAtEnabled { get; set; } = true;
 }
