@@ -7,6 +7,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Xml.Linq;
 using Jellyfin.Data.Enums;
 using Jellyfin.Plugin.FolderCollections.Configuration;
 using MediaBrowser.Controller.Collections;
@@ -39,6 +40,22 @@ public class FolderCollectionService
 {
     private const string PluginMarkerTag = "FolderCollections";
     private const string PluginMarkerOverview = "[FolderCollections]";
+
+    /// <summary>
+    /// 保存失败时最大重试次数.
+    /// </summary>
+    private const int SaveMaxAttempts = 3;
+
+    /// <summary>
+    /// 创建集合后等待 Jellyfin 内部首次保存完成的延迟（毫秒）.
+    /// </summary>
+    private const int PostCreateDelayMs = 300;
+
+    /// <summary>
+    /// 写入后等待异步保存落盘并验证的延迟（毫秒）.
+    /// </summary>
+    private const int PostSaveVerifyDelayMs = 150;
+
     private readonly ILibraryManager _libraryManager;
     private readonly ICollectionManager _collectionManager;
     private readonly ILogger<FolderCollectionService> _logger;
@@ -69,12 +86,8 @@ public class FolderCollectionService
         _logger.LogInformation("开始扫描文件夹集合...");
 
         // ========== 构建标签正则 ==========
-        // 说明：# 标签单独处理，因为它需要把 "整段空格分隔内容" 拆成多个标签；
-        //      其它标签类型（{}、[]、【】、@）保持"一个匹配 = 一个标签"。
-
-        // 1) # 标签正则：捕获 # 后所有空格分隔的词，直到遇到下一个标签起始符或结尾
-        //    例："#教程 123456 春节" → 捕获组1 = "教程 123456 春节" → 拆分后得 3 个标签
-        //        "#教程 2024{入门}" → 捕获组1 = "教程 2024"     → 拆分后得 2 个标签
+        // # 标签单独处理，因为需要把 "整段空格分隔内容" 拆成多个标签；
+        // 其它标签类型（{}、[]、【】、@）保持"一个匹配 = 一个标签"。
         Regex? hashTagPattern = null;
         if (config.TagHashEnabled)
         {
@@ -83,7 +96,6 @@ public class FolderCollectionService
                 RegexOptions.Compiled);
         }
 
-        // 2) 其它标签类型合并为一个正则
         var otherPatterns = new List<string>();
         if (config.TagBraceEnabled)
         {
@@ -111,7 +123,6 @@ public class FolderCollectionService
             otherTagPattern = new Regex(string.Join("|", otherPatterns), RegexOptions.Compiled);
         }
 
-        // 日志汇总
         var enabledFormats = new List<string>();
         if (hashTagPattern != null)
         {
@@ -149,13 +160,11 @@ public class FolderCollectionService
 
         var allCollectionNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-        // 全局统计（跨媒体库）
         int totalCreated = 0;
         int totalUpdated = 0;
         int totalUnchanged = 0;
         int totalMediaItems = 0;
 
-        // 分批全库查询所有候选媒体项（避免任何内部 Limit 截断）
         const int BatchSize = 5000;
         var allItemsById = new Dictionary<Guid, BaseItem>();
         int offset = 0;
@@ -253,7 +262,6 @@ public class FolderCollectionService
 
             _logger.LogInformation("正在处理媒体库: {LibraryName}", library.Name);
 
-            // 用路径匹配筛选出属于本媒体库的媒体项
             var items = new List<BaseItem>();
             foreach (var item in allItems)
             {
@@ -328,7 +336,6 @@ public class FolderCollectionService
                     itemIds.Add(item.Id);
                 }
 
-                // ========== 提取标签 ==========
                 if (!groupTags.TryGetValue(collectionName, out var tagSet))
                 {
                     tagSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -337,8 +344,6 @@ public class FolderCollectionService
 
                 foreach (var part in parts)
                 {
-                    // 1) # 标签：把 "整段空格分隔内容" 拆成多个独立标签
-                    //    例："#教程 123456 春节" → "教程"、"123456"、"春节"
                     if (hashTagPattern != null)
                     {
                         foreach (Match m in hashTagPattern.Matches(part))
@@ -360,7 +365,6 @@ public class FolderCollectionService
                         }
                     }
 
-                    // 2) 其它标签（{}、[]、【】、@）：一个匹配 = 一个标签
                     if (otherTagPattern != null)
                     {
                         foreach (Match m in otherTagPattern.Matches(part))
@@ -417,14 +421,12 @@ public class FolderCollectionService
             }
         }
 
-        // 清理过时集合并获取删除数量
         int totalRemoved = 0;
         if (config.RemoveObsoleteCollections)
         {
             totalRemoved = await CleanupObsoleteCollectionsAsync(allCollectionNames).ConfigureAwait(false);
         }
 
-        // 输出汇总（含删除）
         _logger.LogInformation(
             "本次扫描统计：新增集合 {Created} 个，更新集合 {Updated} 个，删除集合 {Removed} 个，未变化 {Unchanged} 个，共涉及 {MediaCount} 个媒体项。",
             totalCreated,
@@ -443,7 +445,6 @@ public class FolderCollectionService
             return name;
         }
 
-        // 仅用于生成短哈希后缀以保证唯一性，非安全用途。
         var hashBytes = SHA256.HashData(Encoding.UTF8.GetBytes(name));
         var hashStr = Convert.ToHexString(hashBytes).ToLowerInvariant().Substring(0, 8);
 
@@ -470,16 +471,10 @@ public class FolderCollectionService
         if (existing != null)
         {
             var existingItems = GetCollectionItemIds(existing);
-
             var targetItems = itemIds.ToHashSet();
 
             if (overwrite)
             {
-                // ========== 覆盖模式：强制重建 ==========
-                // 注意：Remove/AddToCollectionAsync 会触发 Jellyfin 内部异步元数据刷新，
-                //       该刷新可能在此之后清空集合的 Tags/Images。
-                //       因此这里必须使用 force:true 强制重写标签和封面，
-                //       否则内存中的 existing 是旧对象，会命中 early return 导致不写库。
                 _logger.LogInformation("正在重建集合: {Name}", collectionName);
 
                 if (existingItems.Count > 0)
@@ -489,8 +484,10 @@ public class FolderCollectionService
 
                 await _collectionManager.AddToCollectionAsync(existing.Id, targetItems.ToArray()).ConfigureAwait(false);
 
-                await SyncCollectionMetadataAsync(existing, customTags, force: true).ConfigureAwait(false);
-                await TrySetCollectionCoverAsync(existing, itemIds, force: true).ConfigureAwait(false);
+                // 成员变更会触发 Jellyfin 内部的异步元数据保存，稍作等待避免文件竞争
+                await Task.Delay(PostCreateDelayMs).ConfigureAwait(false);
+
+                await SaveCollectionWithRetryAsync(existing, customTags, itemIds, force: true).ConfigureAwait(false);
 
                 _logger.LogInformation("集合 \"{Name}\" 重建完成，现包含 {Count} 个媒体项。", collectionName, targetItems.Count);
                 return CollectionOperationResult.Updated;
@@ -502,21 +499,11 @@ public class FolderCollectionService
 
                 if (toAdd.Length == 0 && toRemove.Length == 0)
                 {
-                    // 成员无变化：未触发 Jellyfin 内部刷新，可安全使用非强制模式。
-                    // 仅在标签/封面确实不同时才写库，避免每次扫描都白写。
-                    bool coverChanged = await TrySetCollectionCoverAsync(existing, itemIds).ConfigureAwait(false);
-                    bool metadataChanged = await SyncCollectionMetadataAsync(existing, customTags).ConfigureAwait(false);
-
-                    if (coverChanged || metadataChanged)
-                    {
-                        return CollectionOperationResult.Updated;
-                    }
-
-                    return CollectionOperationResult.Unchanged;
+                    // 成员无变化：未触发 Jellyfin 内部刷新，非强制模式即可（避免白写数据库）
+                    bool changed = await SaveCollectionWithRetryAsync(existing, customTags, itemIds, force: false).ConfigureAwait(false);
+                    return changed ? CollectionOperationResult.Updated : CollectionOperationResult.Unchanged;
                 }
 
-                // ========== 增量模式（有增删）：同样触发 Jellyfin 内部刷新 ==========
-                // 因此成员变化后必须强制重写标签和封面。
                 _logger.LogInformation(
                     "正在同步集合 \"{Name}\"：新增 {Add} 个，移除 {Remove} 个。",
                     collectionName,
@@ -533,8 +520,10 @@ public class FolderCollectionService
                     await _collectionManager.AddToCollectionAsync(existing.Id, toAdd).ConfigureAwait(false);
                 }
 
-                await SyncCollectionMetadataAsync(existing, customTags, force: true).ConfigureAwait(false);
-                await TrySetCollectionCoverAsync(existing, itemIds, force: true).ConfigureAwait(false);
+                // 成员变更会触发 Jellyfin 内部的异步元数据保存，稍作等待
+                await Task.Delay(PostCreateDelayMs).ConfigureAwait(false);
+
+                await SaveCollectionWithRetryAsync(existing, customTags, itemIds, force: true).ConfigureAwait(false);
 
                 _logger.LogInformation("集合 \"{Name}\" 同步完成，现包含 {Count} 个媒体项。", collectionName, targetItems.Count);
                 return CollectionOperationResult.Updated;
@@ -558,6 +547,11 @@ public class FolderCollectionService
                 return CollectionOperationResult.Unchanged;
             }
 
+            // 关键：等待 Jellyfin 内部 CreateCollectionAsync 触发的异步 XML 保存完成。
+            // 否则插件的 UpdateToRepositoryAsync 会和它竞争同一个 collection.xml 文件，
+            // 导致我们的 Tags/LockData/Images 写入被 IOException 阻塞而丢失。
+            await Task.Delay(PostCreateDelayMs).ConfigureAwait(false);
+
             var newCollection = _libraryManager.GetItemList(new InternalItemsQuery
             {
                 IncludeItemTypes = new[] { BaseItemKind.BoxSet },
@@ -567,9 +561,7 @@ public class FolderCollectionService
 
             if (newCollection != null)
             {
-                // 新集合：内存对象即为最新状态，非强制模式即可正常写入。
-                await SyncCollectionMetadataAsync(newCollection, customTags).ConfigureAwait(false);
-                await TrySetCollectionCoverAsync(newCollection, itemIds).ConfigureAwait(false);
+                await SaveCollectionWithRetryAsync(newCollection, customTags, itemIds, force: false).ConfigureAwait(false);
             }
 
             _logger.LogInformation("创建新集合: {Name}，包含 {Count} 个媒体项", collectionName, itemIds.Count);
@@ -578,85 +570,92 @@ public class FolderCollectionService
     }
 
     /// <summary>
-    /// 获取集合中当前包含的媒体项 ID（通过 LinkedChildren 读取，兼容 Jellyfin 10.x）.
-    /// </summary>
-    /// <param name="collection">集合对象.</param>
-    /// <returns>媒体项 ID 集合.</returns>
-    private HashSet<Guid> GetCollectionItemIds(BaseItem collection)
-    {
-        var result = new HashSet<Guid>();
-
-        // BoxSet 继承自 Folder，需要转型后才能调用 GetLinkedChildren
-        if (collection is Folder folder)
-        {
-            try
-            {
-                var children = folder.GetLinkedChildren();
-                if (children != null)
-                {
-                    foreach (var child in children)
-                    {
-                        if (child != null)
-                        {
-                            result.Add(child.Id);
-                        }
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "通过 GetLinkedChildren 读取集合 \"{Name}\" 成员失败，回退到 ParentId 查询。", collection.Name);
-            }
-        }
-
-        if (result.Count > 0)
-        {
-            return result;
-        }
-
-        // 回退方式
-        try
-        {
-            var ids = _libraryManager.GetItemIds(new InternalItemsQuery
-            {
-                ParentId = collection.Id,
-                Recursive = true
-            });
-
-            foreach (var id in ids)
-            {
-                result.Add(id);
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "通过 ParentId 读取集合 \"{Name}\" 成员失败。", collection.Name);
-        }
-
-        return result;
-    }
-
-    /// <summary>
-    /// 同步集合的元数据：标签、Overview 标记、锁定状态.
-    /// 只在有实际变化时写数据库（除非 force 为 true）.
+    /// 在内存中应用元数据变更和封面，然后一次性写库并验证.
+    /// 通过合并"元数据更新"和"封面更新"为单次 UpdateToRepositoryAsync，
+    /// 并检查 collection.xml 的 LockData 是否已持久化，失败时自动重试，
+    /// 从而避免 Jellyfin 内部异步保存造成的文件竞争。
     /// </summary>
     /// <param name="collection">集合对象.</param>
     /// <param name="customTags">从文件夹中提取的自定义标签.</param>
-    /// <param name="force">
-    /// true 时忽略内存对象中的旧值，强制执行一次写入。
-    /// 用于成员列表变更后（Remove/AddToCollectionAsync 会触发 Jellyfin 内部异步刷新，
-    /// 可能清空数据库字段，而此时内存对象不会同步更新）。
-    /// </param>
-    /// <returns>是否发生了元数据变化（或强制写入）.</returns>
-    private async Task<bool> SyncCollectionMetadataAsync(
+    /// <param name="itemIds">集合内媒体项 ID 列表.</param>
+    /// <param name="force">是否强制重写（忽略内存缓存判断）.</param>
+    /// <returns>是否有变更被应用并保存.</returns>
+    private async Task<bool> SaveCollectionWithRetryAsync(
         BaseItem collection,
         HashSet<string> customTags,
-        bool force = false)
+        List<Guid> itemIds,
+        bool force)
+    {
+        // ---------- 1. 内存中应用所有变更 ----------
+        bool metadataChanged = ApplyMetadataInMemory(collection, customTags, force);
+        bool coverChanged = ApplyCoverInMemory(collection, itemIds, force);
+
+        if (!metadataChanged && !coverChanged)
+        {
+            return false;
+        }
+
+        var xmlPath = GetCollectionXmlPath(collection);
+
+        // ---------- 2. 一次 Update + 验证 + 重试 ----------
+        for (int attempt = 1; attempt <= SaveMaxAttempts; attempt++)
+        {
+            try
+            {
+                await collection.UpdateToRepositoryAsync(
+                    ItemUpdateType.MetadataEdit,
+                    CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(
+                    ex,
+                    "集合 \"{Name}\" 更新元数据抛出异常（第 {Attempt}/{Max} 次）",
+                    collection.Name,
+                    attempt,
+                    SaveMaxAttempts);
+            }
+
+            // 等待 Jellyfin 的异步保存落盘
+            await Task.Delay(PostSaveVerifyDelayMs).ConfigureAwait(false);
+
+            if (IsCollectionXmlPersisted(xmlPath))
+            {
+                _logger.LogInformation("已保存并验证集合 \"{Name}\" 的元数据与封面。", collection.Name);
+                return true;
+            }
+
+            _logger.LogWarning(
+                "集合 \"{Name}\" 保存验证未通过（第 {Attempt}/{Max} 次），准备重试...",
+                collection.Name,
+                attempt,
+                SaveMaxAttempts);
+
+            // 退避等待，给 Jellyfin 内部保存让路
+            if (attempt < SaveMaxAttempts)
+            {
+                await Task.Delay(200 * attempt).ConfigureAwait(false);
+            }
+        }
+
+        _logger.LogError(
+            "集合 \"{Name}\" 元数据保存失败，已重试 {Max} 次仍不成功。",
+            collection.Name,
+            SaveMaxAttempts);
+        return false;
+    }
+
+    /// <summary>
+    /// 在内存中应用元数据（标签、Overview、锁定）.
+    /// </summary>
+    /// <param name="collection">集合对象.</param>
+    /// <param name="customTags">自定义标签.</param>
+    /// <param name="force">是否强制重写.</param>
+    /// <returns>是否发生了变更.</returns>
+    private bool ApplyMetadataInMemory(BaseItem collection, HashSet<string> customTags, bool force)
     {
         bool needsUpdate = false;
 
-        // 1. 计算目标标签集合（FolderCollections 标记 + 自定义标签）
-        //    force 模式下，忽略内存中的旧标签，视作"需要重写"
         var currentTags = force
             ? new List<string>()
             : (collection.Tags?.ToList() ?? new List<string>());
@@ -670,7 +669,6 @@ public class FolderCollectionService
             }
         }
 
-        // 判断标签是否变化（顺序无关）
         var currentSorted = currentTags.OrderBy(t => t, StringComparer.OrdinalIgnoreCase).ToList();
         var targetSorted = targetTags.OrderBy(t => t, StringComparer.OrdinalIgnoreCase).ToList();
 
@@ -680,7 +678,6 @@ public class FolderCollectionService
             needsUpdate = true;
         }
 
-        // 2. Overview 标记
         var overview = collection.Overview ?? string.Empty;
         if (!overview.Contains(PluginMarkerOverview, StringComparison.Ordinal))
         {
@@ -690,44 +687,24 @@ public class FolderCollectionService
             needsUpdate = true;
         }
 
-        // 3. 锁定状态
         if (!collection.IsLocked)
         {
             collection.IsLocked = true;
             needsUpdate = true;
         }
 
-        if (!needsUpdate)
-        {
-            return false;
-        }
-
-        await collection.UpdateToRepositoryAsync(
-            ItemUpdateType.MetadataEdit,
-            CancellationToken.None).ConfigureAwait(false);
-
-        _logger.LogInformation("已同步并锁定集合 \"{Name}\" 的元数据。", collection.Name);
-        return true;
+        return needsUpdate;
     }
 
     /// <summary>
-    /// 尝试为集合设置封面：取第一个有主图的媒体项图片作为集合封面.
-    /// 如果集合已有封面，不会覆盖（除非 force 为 true）.
+    /// 在内存中应用封面（取第一个有主图的媒体项）.
     /// </summary>
     /// <param name="collection">集合对象.</param>
-    /// <param name="itemIds">集合内的媒体项 ID 列表（按顺序，第一个有封面的会被选中）.</param>
-    /// <param name="force">
-    /// true 时忽略内存对象中的"已有封面"标记，强制重写一次。
-    /// 用于成员列表变更后（Remove/AddToCollectionAsync 会触发 Jellyfin 内部异步刷新，
-    /// 可能清空 Images，而此时内存对象的 HasImage 仍返回旧值）。
-    /// </param>
-    /// <returns>是否发生了封面变化（或强制写入）.</returns>
-    private async Task<bool> TrySetCollectionCoverAsync(
-        BaseItem collection,
-        List<Guid> itemIds,
-        bool force = false)
+    /// <param name="itemIds">集合内媒体项 ID 列表.</param>
+    /// <param name="force">是否强制重写.</param>
+    /// <returns>是否发生了变更.</returns>
+    private bool ApplyCoverInMemory(BaseItem collection, List<Guid> itemIds, bool force)
     {
-        // 非强制模式下，已有封面则跳过；强制模式下，忽略缓存状态，重新写入
         if (!force && collection.HasImage(ImageType.Primary, 0))
         {
             return false;
@@ -760,15 +737,10 @@ public class FolderCollectionService
                     },
                     0);
 
-                await collection.UpdateToRepositoryAsync(
-                    ItemUpdateType.ImageUpdate,
-                    CancellationToken.None).ConfigureAwait(false);
-
                 _logger.LogInformation(
-                    "已为集合 \"{Name}\" 设置封面（来源：{Source}）",
+                    "已为集合 \"{Name}\" 预设置封面（来源：{Source}）",
                     collection.Name,
                     item.Name);
-
                 return true;
             }
             catch (Exception ex)
@@ -777,8 +749,118 @@ public class FolderCollectionService
             }
         }
 
-        // 没有找到可用的封面
         return false;
+    }
+
+    /// <summary>
+    /// 获取集合的 collection.xml 完整路径.
+    /// </summary>
+    /// <param name="collection">集合对象.</param>
+    /// <returns>XML 路径；无法确定时返回 null.</returns>
+    private static string? GetCollectionXmlPath(BaseItem collection)
+    {
+        if (string.IsNullOrEmpty(collection.Path))
+        {
+            return null;
+        }
+
+        return Path.Combine(collection.Path, "collection.xml");
+    }
+
+    /// <summary>
+    /// 检查 collection.xml 是否已将 LockData 持久化为 true.
+    /// </summary>
+    /// <param name="xmlPath">XML 文件路径.</param>
+    /// <returns>是否已持久化.</returns>
+    private static bool IsCollectionXmlPersisted(string? xmlPath)
+    {
+        if (xmlPath == null)
+        {
+            // 无法验证，视为成功（避免死循环）
+            return true;
+        }
+
+        if (!File.Exists(xmlPath))
+        {
+            return false;
+        }
+
+        try
+        {
+            using var fs = new FileStream(xmlPath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            var doc = XDocument.Load(fs);
+            var lockDataElement = doc.Root?.Element("LockData");
+
+            return lockDataElement != null
+                && string.Equals(lockDataElement.Value, "true", StringComparison.OrdinalIgnoreCase);
+        }
+        catch (IOException)
+        {
+            // 文件被占用，说明保存进行中
+            return false;
+        }
+        catch (Exception)
+        {
+            // 解析失败，视为未通过验证
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// 获取集合中当前包含的媒体项 ID（通过 LinkedChildren 读取，兼容 Jellyfin 10.x）.
+    /// </summary>
+    /// <param name="collection">集合对象.</param>
+    /// <returns>媒体项 ID 集合.</returns>
+    private HashSet<Guid> GetCollectionItemIds(BaseItem collection)
+    {
+        var result = new HashSet<Guid>();
+
+        if (collection is Folder folder)
+        {
+            try
+            {
+                var children = folder.GetLinkedChildren();
+                if (children != null)
+                {
+                    foreach (var child in children)
+                    {
+                        if (child != null)
+                        {
+                            result.Add(child.Id);
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "通过 GetLinkedChildren 读取集合 \"{Name}\" 成员失败，回退到 ParentId 查询。", collection.Name);
+            }
+        }
+
+        if (result.Count > 0)
+        {
+            return result;
+        }
+
+        try
+        {
+            var ids = _libraryManager.GetItemIds(new InternalItemsQuery
+            {
+                ParentId = collection.Id,
+                Recursive = true
+            });
+
+            foreach (var id in ids)
+            {
+                result.Add(id);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "通过 ParentId 读取集合 \"{Name}\" 成员失败。", collection.Name);
+        }
+
+        return result;
     }
 
     private static bool IsPluginCollection(BaseItem item)
