@@ -29,7 +29,7 @@
                             <span>服务器启动时自动扫描</span>
                         </label>
                         <div class="fieldDescription">
-                            开启后，Jellyfin 启动完成后会自动执行一次扫描。
+                            开启后，Jellyfin 启动完成后 60 秒会自动执行一次扫描。
                         </div>
                     </div>
 
@@ -64,7 +64,10 @@
                             <input type="checkbox" id="chkTagHash" is="emby-checkbox" />
                             <span>提取 #XX 形式的标签</span>
                         </label>
-                        <div class="fieldDescription">例如文件夹名 "视频 #教程 #入门" 会提取出标签 "教程"、"入门"。</div>
+                        <div class="fieldDescription">
+                            例如文件夹名 "视频 #教程 #入门" 会提取出标签 "教程"、"入门"。<br />
+                            支持多词拆分：文件夹名 "#教程 123456" 会提取出 "教程" 和 "123456" 两个标签。
+                        </div>
                     </div>
 
                     <div class="checkboxContainer">
@@ -93,7 +96,7 @@
 
                     <div class="checkboxContainer">
                         <label>
-                            <input type="checkbox" id="TagAtEnabled" is="emby-checkbox" />
+                            <input type="checkbox" id="chkTagAt" is="emby-checkbox" />
                             <span>提取 @XX 形式的标签</span>
                         </label>
                         <div class="fieldDescription">例如文件夹名 "视频 @教程" 会提取出标签 "教程"。</div>
@@ -127,33 +130,42 @@
                             <span>立即扫描</span>
                         </button>
                     </div>
+
+                    <div id="scanStatus" class="fieldDescription" style="margin-top: 8px; min-height: 1.2em;"></div>
                 </form>
             </div>
         </div>
 
         <script type="text/javascript">
             (function () {
-                var pluginId = '3f2504e0-4f89-11d3-9a0c-0305e82c3301'; // 与你 Plugin.cs 中的 GUID 一致
+                var pluginId = '3f2504e0-4f89-11d3-9a0c-0305e82c3301'; // 与 Plugin.cs 中的 GUID 一致
 
                 var FolderCollectionsConfigPage = {
+                    // ============================================================
+                    // 配置读取
+                    // ============================================================
                     loadConfig: function () {
                         Dashboard.showLoadingMsg();
                         ApiClient.getPluginConfiguration(pluginId).then(function (config) {
                             document.querySelector('#chkOverwriteExisting').checked = config.OverwriteExisting;
                             document.querySelector('#chkScanOnStartup').checked = config.ScanOnStartup;
                             document.querySelector('#chkRemoveObsolete').checked = config.RemoveObsoleteCollections !== false;
+                            document.querySelector('#chkAutoSync').checked = config.AutoSyncAfterLibraryScan !== false;
                             document.querySelector('#chkTagHash').checked = config.TagHashEnabled !== false;
                             document.querySelector('#chkTagBrace').checked = config.TagBraceEnabled !== false;
                             document.querySelector('#chkTagSquareBracket').checked = config.TagSquareBracketEnabled !== false;
                             document.querySelector('#chkTagChineseBracket').checked = config.TagChineseBracketEnabled !== false;
+                            document.querySelector('#chkTagAt').checked = config.TagAtEnabled !== false;
                             document.querySelector('#txtMaxNameLength').value = config.MaxNameLength || 0;
-                            document.querySelector('#chkAutoSync').checked = config.AutoSyncAfterLibraryScan !== false;
-                            document.querySelector('#TagAtEnabled').checked = config.TagAtEnabled !== false;
+
                             FolderCollectionsConfigPage.renderLibraries(config.SelectedLibraryIds || []);
                             Dashboard.hideLoadingMsg();
                         });
                     },
 
+                    // ============================================================
+                    // 渲染媒体库列表
+                    // ============================================================
                     renderLibraries: function (selectedIds) {
                         ApiClient.getVirtualFolders().then(function (folders) {
                             var container = document.querySelector('#libraryList');
@@ -170,6 +182,9 @@
                         });
                     },
 
+                    // ============================================================
+                    // 保存配置
+                    // ============================================================
                     saveConfig: function () {
                         Dashboard.showLoadingMsg();
 
@@ -183,31 +198,110 @@
                             config.OverwriteExisting = document.querySelector('#chkOverwriteExisting').checked;
                             config.ScanOnStartup = document.querySelector('#chkScanOnStartup').checked;
                             config.RemoveObsoleteCollections = document.querySelector('#chkRemoveObsolete').checked;
+                            config.AutoSyncAfterLibraryScan = document.querySelector('#chkAutoSync').checked;
                             config.TagHashEnabled = document.querySelector('#chkTagHash').checked;
                             config.TagBraceEnabled = document.querySelector('#chkTagBrace').checked;
                             config.TagSquareBracketEnabled = document.querySelector('#chkTagSquareBracket').checked;
                             config.TagChineseBracketEnabled = document.querySelector('#chkTagChineseBracket').checked;
+                            config.TagAtEnabled = document.querySelector('#chkTagAt').checked;
                             config.MaxNameLength = parseInt(document.querySelector('#txtMaxNameLength').value) || 0;
-                            config.AutoSyncAfterLibraryScan = document.querySelector('#chkAutoSync').checked;
-                            config.TagAtEnabled = document.querySelector('#TagAtEnabled').checked;
+
                             ApiClient.updatePluginConfiguration(pluginId, config).then(function () {
                                 Dashboard.processPluginConfigurationUpdateResult();
                             });
                         });
                     },
 
-                    triggerScan: function () {
+                    // ============================================================
+                    // 触发扫描（202 已启动 / 409 已在运行 / 404 未加载 / 其他失败）
+                    // ============================================================
+                    triggerScan: function (buttonEl) {
+                        if (buttonEl) buttonEl.disabled = true;
                         Dashboard.showLoadingMsg();
+
                         ApiClient.ajax({
                             type: 'POST',
-                            url: ApiClient.getUrl('FolderCollections/Scan')
+                            url: ApiClient.getUrl('FolderCollections/Scan'),
+                            dataType: 'json'
                         }).then(function () {
                             Dashboard.hideLoadingMsg();
-                            Dashboard.alert('扫描已启动，请查看 Jellyfin 控制台日志。');
+                            Dashboard.alert(
+                                '扫描已启动。\n\n' +
+                                '查看进度：控制台 → 计划任务 → "Folder Collections 扫描"\n' +
+                                '或访问 /FolderCollections/Status 查询实时状态。'
+                            );
+                            // 刷新一次状态显示
+                            FolderCollectionsConfigPage.loadStatus();
+                        }).catch(function (error) {
+                            Dashboard.hideLoadingMsg();
+
+                            // ApiClient 抛出对象里通常带 status（HTTP 状态码）
+                            var status = 0;
+                            if (error) {
+                                if (typeof error.status === 'number') status = error.status;
+                                else if (error.responseJSON && typeof error.responseJSON.status === 'number') status = error.responseJSON.status;
+                            }
+
+                            if (status === 409) {
+                                Dashboard.alert(
+                                    '扫描已在运行中。\n\n' +
+                                    '请到 控制台 → 计划任务 → "Folder Collections 扫描" 查看进度。'
+                                );
+                            } else if (status === 404) {
+                                Dashboard.alert('扫描启动失败：插件未正确加载。请重启 Jellyfin 后重试。');
+                            } else {
+                                var msg = (error && error.statusText) || (error && error.message) || ('HTTP ' + status);
+                                Dashboard.alert('扫描启动失败：' + msg);
+                            }
+                        }).finally(function () {
+                            if (buttonEl) buttonEl.disabled = false;
+                        });
+                    },
+
+                    // ============================================================
+                    // 读取 /FolderCollections/Status 并渲染到 #scanStatus
+                    // ============================================================
+                    loadStatus: function () {
+                        ApiClient.ajax({
+                            type: 'GET',
+                            url: ApiClient.getUrl('FolderCollections/Status'),
+                            dataType: 'json'
+                        }).then(function (status) {
+                            var el = document.querySelector('#scanStatus');
+                            if (!el || !status) return;
+
+                            if (status.isRunning) {
+                                var pct = (typeof status.progress === 'number')
+                                    ? status.progress.toFixed(1)
+                                    : '0.0';
+                                el.textContent = '扫描进行中：' + pct + '% — ' + (status.lastMessage || '');
+                                el.style.color = '#52b54b';
+                            } else if (status.endedAt) {
+                                var when = new Date(status.endedAt).toLocaleString();
+                                var tag = status.cancelled ? '（已取消）' : '';
+                                el.textContent = '上次扫描：' + when + tag
+                                    + ' — 新增 ' + (status.created || 0)
+                                    + '，更新 ' + (status.updated || 0)
+                                    + '，删除 ' + (status.removed || 0)
+                                    + '，未变 ' + (status.unchanged || 0)
+                                    + '，涉及 ' + (status.mediaItemCount || 0) + ' 个媒体项';
+                                el.style.color = '';
+                            } else if (status.errorMessage) {
+                                el.textContent = '上次扫描失败：' + status.errorMessage;
+                                el.style.color = '#c33';
+                            } else {
+                                el.textContent = '尚未运行过。';
+                                el.style.color = '';
+                            }
+                        }).catch(function () {
+                            // 忽略：可能是首次加载或权限问题
                         });
                     }
                 };
 
+                // ============================================================
+                // 事件绑定
+                // ============================================================
                 document.querySelector('#FolderCollectionsConfigForm')
                     .addEventListener('submit', function (e) {
                         e.preventDefault();
@@ -217,10 +311,17 @@
 
                 document.querySelector('#btnTriggerScan')
                     .addEventListener('click', function () {
-                        FolderCollectionsConfigPage.triggerScan();
+                        FolderCollectionsConfigPage.triggerScan(this);
                     });
 
+                // 页面加载完成后执行
                 FolderCollectionsConfigPage.loadConfig();
+                FolderCollectionsConfigPage.loadStatus();
+
+                // 每次进入此配置页时刷新状态（例如从计划任务页返回）
+                document.addEventListener('pageshow', function () {
+                    FolderCollectionsConfigPage.loadStatus();
+                });
             })();
         </script>
     </div>
