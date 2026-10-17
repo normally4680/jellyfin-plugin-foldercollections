@@ -773,22 +773,31 @@ public class FolderCollectionService : IDisposable
             _state.Unchanged = unchanged;
             _state.MediaItemCount = mediaItemCount;
 
-            _state.LastMessage = statusMessage ?? BuildStatusMessage(
-                phase,
-                libraryName,
-                libraryIndex,
-                libraryTotal,
-                collectionIndex,
-                collectionTotal,
-                created,
-                updated,
-                removed);
+            // ========== 统一拼接前缀 ==========
+            if (!string.IsNullOrEmpty(statusMessage))
+            {
+                // 如果传了自定义消息，强制在前面加上 [x/5 阶段名]
+                _state.LastMessage = $"[{phase}] {statusMessage}";
+            }
+            else
+            {
+                // 如果没有传，用默认逻辑拼接（BuildStatusMessage 内部会自带 [x/5] 前缀）
+                _state.LastMessage = BuildStatusMessage(
+                    phase,
+                    libraryName,
+                    libraryIndex,
+                    libraryTotal,
+                    collectionIndex,
+                    collectionTotal,
+                    created,
+                    updated,
+                    removed);
+            }
 
             renderedMessage = _state.LastMessage;
 
-            // ========== 新增：将日志写入内存队列 ==========
+            // ========== 写入内存日志队列 ==========
             var timeStr = DateTime.Now.ToString("HH:mm:ss", CultureInfo.InvariantCulture);
-            // 为了不刷屏，只在有明显变化或者带了 statusMessage 时才记录
             string logLine = $"[{timeStr}] [进度 {percent:F1}%] {renderedMessage}";
 
             // 避免完全重复的行连续出现
