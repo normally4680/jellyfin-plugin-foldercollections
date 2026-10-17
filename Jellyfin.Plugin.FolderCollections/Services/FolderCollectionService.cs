@@ -785,6 +785,22 @@ public class FolderCollectionService : IDisposable
                 removed);
 
             renderedMessage = _state.LastMessage;
+
+            // ========== 新增：将日志写入内存队列 ==========
+            var timeStr = DateTime.Now.ToString("HH:mm:ss", CultureInfo.InvariantCulture);
+            // 为了不刷屏，只在有明显变化或者带了 statusMessage 时才记录
+            string logLine = $"[{timeStr}] [进度 {percent:F1}%] {renderedMessage}";
+
+            // 避免完全重复的行连续出现
+            if (_state.RecentLogs.Count == 0 || _state.RecentLogs[^1] != logLine)
+            {
+                _state.RecentLogs.Add(logLine);
+                // 只保留最近 100 条
+                if (_state.RecentLogs.Count > 100)
+                {
+                    _state.RecentLogs.RemoveAt(0);
+                }
+            }
         }
 
         var now = DateTime.UtcNow;

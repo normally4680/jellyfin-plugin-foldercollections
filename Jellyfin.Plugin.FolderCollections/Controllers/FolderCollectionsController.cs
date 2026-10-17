@@ -107,6 +107,13 @@ public class FolderCollectionsController : ControllerBase
     public IActionResult GetStatus()
     {
         var snapshot = _service.GetSnapshot();
+        // 加这行日志，访问页面时能在控制台看到后端返回了啥
+        _logger.LogInformation(
+            "API 查询状态: IsRunning={IsRunning}, Progress={Progress}, Started={Started}",
+            snapshot.IsRunning,
+            snapshot.Progress,
+            snapshot.StartedAt);
+
         return Ok(snapshot);
     }
 }

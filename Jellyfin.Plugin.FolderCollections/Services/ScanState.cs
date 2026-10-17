@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Text.Json.Serialization;
 
 namespace Jellyfin.Plugin.FolderCollections.Services;
 
@@ -25,64 +27,69 @@ public enum ScanRunResult
 /// </summary>
 public sealed class ScanState
 {
-    /// <summary>Gets or sets 是否正在运行.</summary>
+    [JsonPropertyName("isRunning")]
     public bool IsRunning { get; set; }
 
-    /// <summary>Gets or sets 总进度（0~100）.</summary>
+    [JsonPropertyName("progress")]
     public double Progress { get; set; }
 
-    /// <summary>Gets or sets 当前阶段名，如 "4/5 创建集合".</summary>
+    [JsonPropertyName("phase")]
     public string Phase { get; set; } = string.Empty;
 
-    /// <summary>Gets or sets 当前媒体库名.</summary>
+    [JsonPropertyName("libraryName")]
     public string LibraryName { get; set; } = string.Empty;
 
-    /// <summary>Gets or sets 当前媒体库序号（从 1 开始）.</summary>
+    [JsonPropertyName("libraryIndex")]
     public int LibraryIndex { get; set; }
 
-    /// <summary>Gets or sets 媒体库总数.</summary>
+    [JsonPropertyName("libraryTotal")]
     public int LibraryTotal { get; set; }
 
-    /// <summary>Gets or sets 当前媒体库内已处理集合数.</summary>
+    [JsonPropertyName("collectionIndex")]
     public int CollectionIndex { get; set; }
 
-    /// <summary>Gets or sets 当前媒体库内集合总数.</summary>
+    [JsonPropertyName("collectionTotal")]
     public int CollectionTotal { get; set; }
 
-    /// <summary>Gets or sets 新增集合数.</summary>
+    [JsonPropertyName("created")]
     public int Created { get; set; }
 
-    /// <summary>Gets or sets 更新集合数.</summary>
+    [JsonPropertyName("updated")]
     public int Updated { get; set; }
 
-    /// <summary>Gets or sets 删除集合数.</summary>
+    [JsonPropertyName("removed")]
     public int Removed { get; set; }
 
-    /// <summary>Gets or sets 未变化集合数.</summary>
+    [JsonPropertyName("unchanged")]
     public int Unchanged { get; set; }
 
-    /// <summary>Gets or sets 累计媒体项数.</summary>
+    [JsonPropertyName("mediaItemCount")]
     public int MediaItemCount { get; set; }
 
-    /// <summary>Gets or sets 扫描开始时间（UTC）.</summary>
+    [JsonPropertyName("startedAt")]
     public DateTime StartedAt { get; set; }
 
-    /// <summary>Gets or sets 扫描结束时间（UTC）.</summary>
+    [JsonPropertyName("endedAt")]
     public DateTime? EndedAt { get; set; }
 
-    /// <summary>Gets or sets 最近一条状态文字.</summary>
+    [JsonPropertyName("lastMessage")]
     public string LastMessage { get; set; } = string.Empty;
 
-    /// <summary>Gets or sets a value indicating whether 是否被取消.</summary>
+    [JsonPropertyName("cancelled")]
     public bool Cancelled { get; set; }
 
-    /// <summary>Gets or sets 错误信息（如果有）.</summary>
+    [JsonPropertyName("errorMessage")]
     public string? ErrorMessage { get; set; }
+
+    /// <summary>
+    /// Gets or sets 最近的内存日志，用于前端控制台展示.
+    /// </summary>
+    [JsonPropertyName("recentLogs")]
+    public List<string> RecentLogs { get; set; } = new();
 
     /// <summary>
     /// 生成一份深拷贝快照.
     /// </summary>
-    /// <returns>新的 ScanState 实例.</returns>
     public ScanState Clone()
     {
         return new ScanState
@@ -104,7 +111,9 @@ public sealed class ScanState
             EndedAt = EndedAt,
             LastMessage = LastMessage,
             Cancelled = Cancelled,
-            ErrorMessage = ErrorMessage
+            ErrorMessage = ErrorMessage,
+            // 深拷贝 List
+            RecentLogs = new List<string>(RecentLogs)
         };
     }
 }

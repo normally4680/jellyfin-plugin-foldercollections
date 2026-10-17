@@ -3,6 +3,96 @@
 
 <head>
     <title>Folder Collections</title>
+    <style>
+        /* ========== 内嵌状态面板样式 ========== */
+        .fc-status-card {
+            display: none;
+            background-color: #1a1a1a !important;
+            border: 1px solid #444 !important;
+            border-radius: 8px !important;
+            padding: 20px !important;
+            margin-top: 20px !important;
+            margin-bottom: 20px !important;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5) !important;
+            color: #eee !important;
+            /* 去除了 width: 100%，让它自动适应父容器 */
+        }
+
+        .fc-card-header {
+            display: flex !important;
+            justify-content: space-between !important;
+            align-items: center !important;
+            border-bottom: 1px solid #333 !important;
+            padding-bottom: 10px !important;
+            margin-bottom: 15px !important;
+            font-weight: bold !important;
+            font-size: 1.1em !important;
+        }
+
+        .fc-progress-container {
+            width: 100% !important;
+            background-color: #333 !important;
+            border-radius: 4px !important;
+            margin: 10px 0 15px 0 !important;
+            overflow: hidden !important;
+            height: 20px !important;
+        }
+
+        .fc-progress-bar {
+            height: 100% !important;
+            background-color: #00a4dc !important;
+            width: 0% !important;
+            transition: width 0.3s ease !important;
+        }
+
+        .fc-status-row {
+            display: flex !important;
+            justify-content: space-between !important;
+            margin-bottom: 8px !important;
+            font-size: 0.95em !important;
+        }
+
+        .fc-status-label {
+            color: #aaa !important;
+        }
+
+        .fc-status-value {
+            font-weight: bold !important;
+            color: #eee !important;
+        }
+
+        /* 终端样式 */
+        .fc-terminal {
+            background-color: #0d0d0d !important;
+            border: 1px solid #333 !important;
+            border-radius: 4px !important;
+            padding: 12px !important;
+            height: 250px !important;
+            overflow-y: auto !important;
+            font-family: Consolas, "Courier New", monospace !important;
+            font-size: 0.85em !important;
+            color: #4af626 !important;
+            line-height: 1.5 !important;
+            margin-top: 15px !important;
+            margin-bottom: 10px !important;
+        }
+
+        .fc-terminal::-webkit-scrollbar {
+            width: 8px !important;
+        }
+
+        .fc-terminal::-webkit-scrollbar-thumb {
+            background: #444 !important;
+            border-radius: 4px !important;
+        }
+
+        /* 单行日志 */
+        .fc-log-line {
+            margin-bottom: 4px !important;
+            white-space: pre-wrap !important;
+            word-break: break-all !important;
+        }
+    </style>
 </head>
 
 <body>
@@ -14,107 +104,53 @@
                     <h2>文件夹自动集合配置</h2>
 
                     <div class="checkboxContainer">
-                        <label>
-                            <input type="checkbox" id="chkOverwriteExisting" is="emby-checkbox" />
-                            <span>覆盖已存在的同名集合</span>
-                        </label>
-                        <div class="fieldDescription">
-                            勾选后，每次扫描会清空已有集合内容并重新添加；不勾选则保留现有集合。
-                        </div>
+                        <label><input type="checkbox" id="chkOverwriteExisting"
+                                is="emby-checkbox" /><span>覆盖已存在的同名集合</span></label>
                     </div>
-
                     <div class="checkboxContainer">
-                        <label>
-                            <input type="checkbox" id="chkScanOnStartup" is="emby-checkbox" />
-                            <span>服务器启动时自动扫描</span>
-                        </label>
-                        <div class="fieldDescription">
-                            开启后，Jellyfin 启动完成后 60 秒会自动执行一次扫描。
-                        </div>
+                        <label><input type="checkbox" id="chkScanOnStartup"
+                                is="emby-checkbox" /><span>服务器启动时自动扫描</span></label>
                     </div>
-
                     <div class="checkboxContainer">
-                        <label>
-                            <input type="checkbox" id="chkRemoveObsolete" is="emby-checkbox" />
-                            <span>自动删除不再需要的集合</span>
-                        </label>
-                        <div class="fieldDescription">
-                            开启后，当媒体库中的文件夹被删除后，插件会自动清理对应的集合。仅删除由本插件创建的集合。
-                        </div>
+                        <label><input type="checkbox" id="chkRemoveObsolete"
+                                is="emby-checkbox" /><span>自动删除不再需要的集合</span></label>
                     </div>
-
                     <div class="checkboxContainer">
-                        <label>
-                            <input type="checkbox" id="chkAutoSync" is="emby-checkbox" />
-                            <span>媒体库扫描完成后自动同步集合</span>
-                        </label>
-                        <div class="fieldDescription">
-                            开启后，每次 Jellyfin 完成媒体库扫描，插件会自动同步集合。关闭后只在你手动点击"立即扫描"时同步。
-                        </div>
+                        <label><input type="checkbox" id="chkAutoSync"
+                                is="emby-checkbox" /><span>媒体库扫描完成后自动同步集合</span></label>
                     </div>
 
                     <br />
                     <h3>标签提取</h3>
-                    <div class="fieldDescription" style="margin-bottom: 10px;">
-                        开启后，插件会从文件夹名中提取标记作为集合标签，方便在 Jellyfin 中筛选。
-                    </div>
-
                     <div class="checkboxContainer">
-                        <label>
-                            <input type="checkbox" id="chkTagHash" is="emby-checkbox" />
-                            <span>提取 #XX 形式的标签</span>
-                        </label>
-                        <div class="fieldDescription">
-                            例如文件夹名 "视频 #教程 #入门" 会提取出标签 "教程"、"入门"。<br />
-                            支持多词拆分：文件夹名 "#教程 123456" 会提取出 "教程" 和 "123456" 两个标签。
-                        </div>
+                        <label><input type="checkbox" id="chkTagHash" is="emby-checkbox" /><span>提取 #XX
+                                形式的标签</span></label>
                     </div>
-
                     <div class="checkboxContainer">
-                        <label>
-                            <input type="checkbox" id="chkTagBrace" is="emby-checkbox" />
-                            <span>提取 {XX} 形式的标签</span>
-                        </label>
-                        <div class="fieldDescription">例如文件夹名 "视频 {教程}" 会提取出标签 "教程"。</div>
+                        <label><input type="checkbox" id="chkTagBrace" is="emby-checkbox" /><span>提取 {XX}
+                                形式的标签</span></label>
                     </div>
-
                     <div class="checkboxContainer">
-                        <label>
-                            <input type="checkbox" id="chkTagSquareBracket" is="emby-checkbox" />
-                            <span>提取 [XX] 形式的标签</span>
-                        </label>
-                        <div class="fieldDescription">例如文件夹名 "视频 [教程]" 会提取出标签 "教程"。</div>
+                        <label><input type="checkbox" id="chkTagSquareBracket" is="emby-checkbox" /><span>提取 [XX]
+                                形式的标签</span></label>
                     </div>
-
                     <div class="checkboxContainer">
-                        <label>
-                            <input type="checkbox" id="chkTagChineseBracket" is="emby-checkbox" />
-                            <span>提取 【XX】 形式的标签</span>
-                        </label>
-                        <div class="fieldDescription">例如文件夹名 "视频 【教程】" 会提取出标签 "教程"。</div>
+                        <label><input type="checkbox" id="chkTagChineseBracket" is="emby-checkbox" /><span>提取 【XX】
+                                形式的标签</span></label>
                     </div>
-
                     <div class="checkboxContainer">
-                        <label>
-                            <input type="checkbox" id="chkTagAt" is="emby-checkbox" />
-                            <span>提取 @XX 形式的标签</span>
-                        </label>
-                        <div class="fieldDescription">例如文件夹名 "视频 @教程" 会提取出标签 "教程"。</div>
+                        <label><input type="checkbox" id="chkTagAt" is="emby-checkbox" /><span>提取 @XX
+                                形式的标签</span></label>
                     </div>
 
                     <div class="inputContainer">
                         <label class="inputLabel" for="txtMaxNameLength">集合名最大字符长度（0=不限制）</label>
                         <input id="txtMaxNameLength" type="number" is="emby-input" min="0" max="200" />
-                        <div class="fieldDescription">
-                            超过此长度时，用哈希后缀保证集合名唯一且不超长。推荐 80。
-                        </div>
                     </div>
 
                     <br />
                     <h3>选择需要扫描的媒体库</h3>
-                    <div id="libraryList" class="checkboxList">
-                        <!-- 媒体库列表通过 JS 动态插入 -->
-                    </div>
+                    <div id="libraryList" class="checkboxList"></div>
 
                     <br />
                     <div>
@@ -122,7 +158,6 @@
                             <span>保存配置</span>
                         </button>
                     </div>
-
                     <br />
                     <div>
                         <button is="emby-button" type="button" id="btnTriggerScan"
@@ -130,20 +165,79 @@
                             <span>立即扫描</span>
                         </button>
                     </div>
+                    <br />
+                    <div>
+                        <button is="emby-button" type="button" id="btnShowStatus" class="raised block emby-button"
+                            style="background-color: #333;">
+                            <span>查看扫描状态 / 记录</span>
+                        </button>
+                    </div>
 
-                    <div id="scanStatus" class="fieldDescription" style="margin-top: 8px; min-height: 1.2em;"></div>
+                    <!-- ========== 内嵌状态面板 ========== -->
+                    <div id="fcStatusCard" class="fc-status-card">
+                        <div class="fc-card-header">
+                            <div>
+                                <span id="cardLiveDot"
+                                    style="display:none; color:#52b54b; font-size:16px; margin-right:8px;">●</span>
+                                <span>Folder Collections 状态终端</span>
+                            </div>
+                        </div>
+
+                        <div class="fc-status-row">
+                            <span id="cardPhase" class="fc-status-value" style="color:#00a4dc;">等待扫描数据...</span>
+                            <span id="cardPercent" class="fc-status-value">0.0%</span>
+                        </div>
+
+                        <div class="fc-progress-container">
+                            <div id="cardProgressBar" class="fc-progress-bar"></div>
+                        </div>
+
+                        <div class="fc-status-row">
+                            <span class="fc-status-label">当前媒体库:</span>
+                            <span id="cardLibrary" class="fc-status-value">-</span>
+                        </div>
+                        <div class="fc-status-row">
+                            <span class="fc-status-label">当前集合进度:</span>
+                            <span id="cardCollection" class="fc-status-value">-</span>
+                        </div>
+                        <div class="fc-status-row">
+                            <span class="fc-status-label">已新增 / 更新 / 删除:</span>
+                            <span id="cardCounts" class="fc-status-value" style="color:#52b54b;">0 / 0 / 0</span>
+                        </div>
+
+                        <!-- 终端输出区域 -->
+                        <div id="cardTerminal" class="fc-terminal">等待日志输出...</div>
+                    </div>
+
+                    <!-- 收起按钮移到外面，与上方三个按钮完全同级 -->
+                    <div id="divHideStatus" style="display: none;">
+                        <button is="emby-button" type="button" id="btnHideStatus" class="raised block emby-button"
+                            style="background-color: #333;">
+                            <span>收起状态面板</span>
+                        </button>
+                    </div>
+
                 </form>
             </div>
         </div>
 
         <script type="text/javascript">
             (function () {
-                var pluginId = '3f2504e0-4f89-11d3-9a0c-0305e82c3301'; // 与 Plugin.cs 中的 GUID 一致
+                var pluginId = '3f2504e0-4f89-11d3-9a0c-0305e82c3301';
+                var pollTimer = null;
+                var cardEl = document.querySelector('#fcStatusCard');
+                var divHideEl = document.querySelector('#divHideStatus');
+                var terminalEl = document.querySelector('#cardTerminal');
+
+                // 兼容大小写读取
+                function getVal(obj, key) {
+                    if (!obj) return undefined;
+                    if (obj[key] !== undefined) return obj[key];
+                    var upperKey = key.charAt(0).toUpperCase() + key.slice(1);
+                    return obj[upperKey];
+                }
 
                 var FolderCollectionsConfigPage = {
-                    // ============================================================
-                    // 配置读取
-                    // ============================================================
                     loadConfig: function () {
                         Dashboard.showLoadingMsg();
                         ApiClient.getPluginConfiguration(pluginId).then(function (config) {
@@ -163,9 +257,6 @@
                         });
                     },
 
-                    // ============================================================
-                    // 渲染媒体库列表
-                    // ============================================================
                     renderLibraries: function (selectedIds) {
                         ApiClient.getVirtualFolders().then(function (folders) {
                             var container = document.querySelector('#libraryList');
@@ -182,17 +273,12 @@
                         });
                     },
 
-                    // ============================================================
-                    // 保存配置
-                    // ============================================================
                     saveConfig: function () {
                         Dashboard.showLoadingMsg();
-
                         var selectedIds = [];
                         document.querySelectorAll('.libraryCheckbox:checked').forEach(function (cb) {
                             selectedIds.push(cb.getAttribute('data-id'));
                         });
-
                         ApiClient.getPluginConfiguration(pluginId).then(function (config) {
                             config.SelectedLibraryIds = selectedIds;
                             config.OverwriteExisting = document.querySelector('#chkOverwriteExisting').checked;
@@ -212,9 +298,6 @@
                         });
                     },
 
-                    // ============================================================
-                    // 触发扫描（202 已启动 / 409 已在运行 / 404 未加载 / 其他失败）
-                    // ============================================================
                     triggerScan: function (buttonEl) {
                         if (buttonEl) buttonEl.disabled = true;
                         Dashboard.showLoadingMsg();
@@ -225,103 +308,149 @@
                             dataType: 'json'
                         }).then(function () {
                             Dashboard.hideLoadingMsg();
-                            Dashboard.alert(
-                                '扫描已启动。\n\n' +
-                                '查看进度：控制台 → 计划任务 → "Folder Collections 扫描"\n' +
-                                '或访问 /FolderCollections/Status 查询实时状态。'
-                            );
-                            // 刷新一次状态显示
-                            FolderCollectionsConfigPage.loadStatus();
+                            FolderCollectionsConfigPage.showCard();
                         }).catch(function (error) {
                             Dashboard.hideLoadingMsg();
-
-                            // ApiClient 抛出对象里通常带 status（HTTP 状态码）
                             var status = 0;
-                            if (error) {
-                                if (typeof error.status === 'number') status = error.status;
-                                else if (error.responseJSON && typeof error.responseJSON.status === 'number') status = error.responseJSON.status;
-                            }
-
+                            if (error && error.status) status = error.status;
                             if (status === 409) {
-                                Dashboard.alert(
-                                    '扫描已在运行中。\n\n' +
-                                    '请到 控制台 → 计划任务 → "Folder Collections 扫描" 查看进度。'
-                                );
-                            } else if (status === 404) {
-                                Dashboard.alert('扫描启动失败：插件未正确加载。请重启 Jellyfin 后重试。');
+                                Dashboard.alert('扫描已在运行中。即将为你展开实时监控。');
+                                FolderCollectionsConfigPage.showCard();
                             } else {
-                                var msg = (error && error.statusText) || (error && error.message) || ('HTTP ' + status);
-                                Dashboard.alert('扫描启动失败：' + msg);
+                                Dashboard.alert('扫描启动失败：' + ((error && error.statusText) || '未知错误'));
                             }
                         }).finally(function () {
                             if (buttonEl) buttonEl.disabled = false;
                         });
                     },
 
-                    // ============================================================
-                    // 读取 /FolderCollections/Status 并渲染到 #scanStatus
-                    // ============================================================
+                    showCard: function () {
+                        cardEl.style.display = 'block';
+                        divHideEl.style.display = 'block'; // 显示底部的收起按钮
+                        cardEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+                        FolderCollectionsConfigPage.loadStatus();
+                        if (pollTimer) clearInterval(pollTimer);
+                        pollTimer = setInterval(FolderCollectionsConfigPage.loadStatus, 1000);
+                    },
+
+                    hideCard: function () {
+                        cardEl.style.display = 'none';
+                        divHideEl.style.display = 'none'; // 隐藏底部的收起按钮
+                        if (pollTimer) {
+                            clearInterval(pollTimer);
+                            pollTimer = null;
+                        }
+                    },
+
                     loadStatus: function () {
                         ApiClient.ajax({
                             type: 'GET',
                             url: ApiClient.getUrl('FolderCollections/Status'),
                             dataType: 'json'
                         }).then(function (status) {
-                            var el = document.querySelector('#scanStatus');
-                            if (!el || !status) return;
+                            if (!status) return;
 
-                            if (status.isRunning) {
-                                var pct = (typeof status.progress === 'number')
-                                    ? status.progress.toFixed(1)
-                                    : '0.0';
-                                el.textContent = '扫描进行中：' + pct + '% — ' + (status.lastMessage || '');
-                                el.style.color = '#52b54b';
-                            } else if (status.endedAt) {
-                                var when = new Date(status.endedAt).toLocaleString();
-                                var tag = status.cancelled ? '（已取消）' : '';
-                                el.textContent = '上次扫描：' + when + tag
-                                    + ' — 新增 ' + (status.created || 0)
-                                    + '，更新 ' + (status.updated || 0)
-                                    + '，删除 ' + (status.removed || 0)
-                                    + '，未变 ' + (status.unchanged || 0)
-                                    + '，涉及 ' + (status.mediaItemCount || 0) + ' 个媒体项';
-                                el.style.color = '';
-                            } else if (status.errorMessage) {
-                                el.textContent = '上次扫描失败：' + status.errorMessage;
-                                el.style.color = '#c33';
+                            var isRunning = getVal(status, 'isRunning');
+                            var progress = getVal(status, 'progress') || 0;
+                            var phase = getVal(status, 'phase') || '等待扫描数据...';
+                            var libName = getVal(status, 'libraryName');
+                            var libIndex = getVal(status, 'libraryIndex') || 0;
+                            var libTotal = getVal(status, 'libraryTotal') || 0;
+                            var colIndex = getVal(status, 'collectionIndex') || 0;
+                            var colTotal = getVal(status, 'collectionTotal') || 0;
+                            var created = getVal(status, 'created') || 0;
+                            var updated = getVal(status, 'updated') || 0;
+                            var removed = getVal(status, 'removed') || 0;
+                            var recentLogs = getVal(status, 'recentLogs') || [];
+                            var errorMsg = getVal(status, 'errorMessage');
+
+                            document.querySelector('#cardProgressBar').style.width = progress + '%';
+                            document.querySelector('#cardPercent').textContent = progress.toFixed(1) + '%';
+
+                            var liveDot = document.querySelector('#cardLiveDot');
+                            var phaseEl = document.querySelector('#cardPhase');
+
+                            if (isRunning) {
+                                liveDot.style.display = 'inline';
+                                phaseEl.textContent = phase;
+                                phaseEl.style.color = '#00a4dc';
+                                document.querySelector('#cardProgressBar').style.backgroundColor = '#00a4dc';
                             } else {
-                                el.textContent = '尚未运行过。';
-                                el.style.color = '';
+                                liveDot.style.display = 'none';
+                                document.querySelector('#cardProgressBar').style.backgroundColor = '#52b54b';
+
+                                if (errorMsg) {
+                                    phaseEl.textContent = '扫描失败: ' + errorMsg;
+                                    phaseEl.style.color = '#ff5555';
+                                } else if (progress >= 100) {
+                                    phaseEl.textContent = '扫描已完成';
+                                    phaseEl.style.color = '#52b54b';
+                                } else {
+                                    phaseEl.textContent = '等待扫描数据...';
+                                    phaseEl.style.color = '#aaa';
+                                }
                             }
-                        }).catch(function () {
-                            // 忽略：可能是首次加载或权限问题
+
+                            if (libName) {
+                                document.querySelector('#cardLibrary').textContent = libName + ' (' + libIndex + '/' + libTotal + ')';
+                            } else {
+                                document.querySelector('#cardLibrary').textContent = '-';
+                            }
+
+                            if (colTotal > 0) {
+                                document.querySelector('#cardCollection').textContent = colIndex + ' / ' + colTotal;
+                            } else {
+                                document.querySelector('#cardCollection').textContent = '-';
+                            }
+
+                            document.querySelector('#cardCounts').textContent = created + ' / ' + updated + ' / ' + removed;
+
+                            // 渲染终端日志
+                            if (recentLogs && recentLogs.length > 0) {
+                                var currentLogStr = recentLogs.join('|');
+                                if (terminalEl.getAttribute('data-last-log') !== currentLogStr) {
+                                    terminalEl.setAttribute('data-last-log', currentLogStr);
+                                    terminalEl.innerHTML = '';
+
+                                    recentLogs.forEach(function (line) {
+                                        var div = document.createElement('div');
+                                        div.className = 'fc-log-line';
+                                        div.textContent = line;
+                                        terminalEl.appendChild(div);
+                                    });
+
+                                    terminalEl.scrollTop = terminalEl.scrollHeight;
+                                }
+                            } else {
+                                terminalEl.textContent = "等待日志输出...";
+                            }
+
+                        }).catch(function (err) {
+                            console.error("Status load error:", err);
                         });
                     }
                 };
 
-                // ============================================================
-                // 事件绑定
-                // ============================================================
-                document.querySelector('#FolderCollectionsConfigForm')
-                    .addEventListener('submit', function (e) {
-                        e.preventDefault();
-                        FolderCollectionsConfigPage.saveConfig();
-                        return false;
-                    });
-
-                document.querySelector('#btnTriggerScan')
-                    .addEventListener('click', function () {
-                        FolderCollectionsConfigPage.triggerScan(this);
-                    });
-
-                // 页面加载完成后执行
-                FolderCollectionsConfigPage.loadConfig();
-                FolderCollectionsConfigPage.loadStatus();
-
-                // 每次进入此配置页时刷新状态（例如从计划任务页返回）
-                document.addEventListener('pageshow', function () {
-                    FolderCollectionsConfigPage.loadStatus();
+                document.querySelector('#FolderCollectionsConfigForm').addEventListener('submit', function (e) {
+                    e.preventDefault();
+                    FolderCollectionsConfigPage.saveConfig();
+                    return false;
                 });
+
+                document.querySelector('#btnTriggerScan').addEventListener('click', function () {
+                    FolderCollectionsConfigPage.triggerScan(this);
+                });
+
+                document.querySelector('#btnShowStatus').addEventListener('click', function () {
+                    FolderCollectionsConfigPage.showCard();
+                });
+
+                document.querySelector('#btnHideStatus').addEventListener('click', function () {
+                    FolderCollectionsConfigPage.hideCard();
+                });
+
+                FolderCollectionsConfigPage.loadConfig();
             })();
         </script>
     </div>
