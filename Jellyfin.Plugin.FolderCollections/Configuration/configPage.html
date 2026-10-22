@@ -143,6 +143,18 @@
                                 形式的标签</span></label>
                     </div>
 
+                    <div class="checkboxContainer">
+                        <label><input type="checkbox" id="chkTagPlainWords"
+                                is="emby-checkbox" /><span>提取无符号的普通词汇</span></label>
+                        <div class="fieldDescription">例如文件夹名 "#A #B aa bb" 会提取出 "A"、"B"、"aa"、"bb"。</div>
+                    </div>
+
+                    <div class="checkboxContainer">
+                        <label><input type="checkbox" id="chkTagRoundBracket" is="emby-checkbox" /><span>提取 () 或 （）
+                                形式的标签</span></label>
+                        <div class="fieldDescription">例如文件夹名 "作者(画师)" 会提取出标签 "作者"、"画师"。</div>
+                    </div>
+
                     <div class="inputContainer">
                         <label class="inputLabel" for="txtMaxNameLength">集合名最大字符长度（0=不限制）</label>
                         <input id="txtMaxNameLength" type="number" is="emby-input" min="0" max="200" />
@@ -251,6 +263,8 @@
                             document.querySelector('#chkTagChineseBracket').checked = config.TagChineseBracketEnabled !== false;
                             document.querySelector('#chkTagAt').checked = config.TagAtEnabled !== false;
                             document.querySelector('#txtMaxNameLength').value = config.MaxNameLength || 0;
+                            document.querySelector('#chkTagPlainWords').checked = config.TagExtractPlainWords !== false;
+                            document.querySelector('#chkTagRoundBracket').checked = config.TagRoundBracketEnabled !== false;
 
                             FolderCollectionsConfigPage.renderLibraries(config.SelectedLibraryIds || []);
                             Dashboard.hideLoadingMsg();
@@ -291,6 +305,8 @@
                             config.TagChineseBracketEnabled = document.querySelector('#chkTagChineseBracket').checked;
                             config.TagAtEnabled = document.querySelector('#chkTagAt').checked;
                             config.MaxNameLength = parseInt(document.querySelector('#txtMaxNameLength').value) || 0;
+                            config.TagExtractPlainWords = document.querySelector('#chkTagPlainWords').checked;
+                            config.TagRoundBracketEnabled = document.querySelector('#chkTagRoundBracket').checked;
 
                             ApiClient.updatePluginConfiguration(pluginId, config).then(function () {
                                 Dashboard.processPluginConfigurationUpdateResult();

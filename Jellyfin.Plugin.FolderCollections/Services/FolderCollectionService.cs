@@ -222,8 +222,9 @@ public class FolderCollectionService : IDisposable
         Regex? hashTagPattern = null;
         if (config.TagHashEnabled)
         {
+            // 注意：排除了 ( 和 （，遇到括号时 # 的宽松提取会提前停止
             hashTagPattern = new Regex(
-                @"#([^\s#\{\[【@]+(?:\s+[^\s#\{\[【@]+)*)",
+                @"#([^\s#\{\[【@\(（]+(?:\s+[^\s#\{\[【@\(（]+)*)",
                 RegexOptions.Compiled);
         }
 
@@ -245,7 +246,15 @@ public class FolderCollectionService : IDisposable
 
         if (config.TagAtEnabled)
         {
-            otherPatterns.Add(@"@([^\s@]+)");
+            // 同样排除了括号，避免 @User(Name) 把括号吃进去
+            otherPatterns.Add(@"@([^\s@\(（]+)");
+        }
+
+        // 新增：提取中英文圆括号
+        if (config.TagRoundBracketEnabled)
+        {
+            // 匹配 () 或 （） 里的内容，允许里面包含空格
+            otherPatterns.Add(@"[\(（]([^\)）\n]+)[\)）]");
         }
 
         Regex? otherTagPattern = otherPatterns.Count > 0
@@ -276,6 +285,11 @@ public class FolderCollectionService : IDisposable
         if (config.TagAtEnabled)
         {
             enabledFormats.Add("@");
+        }
+
+        if (config.TagRoundBracketEnabled)
+        {
+            enabledFormats.Add("()");
         }
 
         _logger.LogInformation(
@@ -556,6 +570,9 @@ public class FolderCollectionService : IDisposable
 
                 foreach (var part in parts)
                 {
+                    string textToExtractWords = part;
+
+                    // 1) # 标签：把 "整段空格分隔内容" 拆成多个独立标签
                     if (hashTagPattern != null)
                     {
                         foreach (Match m in hashTagPattern.Matches(part))
@@ -566,17 +583,18 @@ public class FolderCollectionService : IDisposable
                             }
 
                             var raw = m.Groups[1].Value;
-                            var tokens = raw.Split(
-                                new[] { ' ', '\t' },
-                                StringSplitOptions.RemoveEmptyEntries);
-
+                            var tokens = raw.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
                             foreach (var token in tokens)
                             {
                                 tagSet.Add(token);
                             }
                         }
+
+                        // 将已匹配的 # 标签从字符串中剔除，用空格替代
+                        textToExtractWords = hashTagPattern.Replace(textToExtractWords, " ");
                     }
 
+                    // 2) 其它标签（{}、[]、【】、@、()）：一个匹配 = 一个标签
                     if (otherTagPattern != null)
                     {
                         foreach (Match m in otherTagPattern.Matches(part))
@@ -588,6 +606,27 @@ public class FolderCollectionService : IDisposable
                                     tagSet.Add(m.Groups[g].Value);
                                     break;
                                 }
+                            }
+                        }
+
+                        // 将已匹配的其他标签从字符串中剔除，用空格替代
+                        textToExtractWords = otherTagPattern.Replace(textToExtractWords, " ");
+                    }
+
+                    // 3) 提取剩下的普通词汇（不带符号的）
+                    if (config.TagExtractPlainWords)
+                    {
+                        // 因为标签已经被挖走替换成了空格，剩下的直接用空格拆分
+                        var plainWords = textToExtractWords.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
+                        foreach (var word in plainWords)
+                        {
+                            // 去掉词语首尾可能残留的标点符号（如逗号、句号）
+                            var cleanWord = word.Trim('，', '。', '！', '？', ',', '.', '!', '?', '(', ')', '（', '）', '-', '_');
+
+                            // 确保不是空的，且必须包含字母或数字（避免纯符号混入）
+                            if (!string.IsNullOrEmpty(cleanWord) && cleanWord.Any(char.IsLetterOrDigit))
+                            {
+                                tagSet.Add(cleanWord);
                             }
                         }
                     }

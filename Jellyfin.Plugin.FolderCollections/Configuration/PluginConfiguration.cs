@@ -65,4 +65,14 @@ public class PluginConfiguration : BasePluginConfiguration
     /// Gets or sets a value indicating whether 提取 @XX 形式的标签.
     /// </summary>
     public bool TagAtEnabled { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether 提取不带符号的普通词汇作为标签.
+    /// </summary>
+    public bool TagExtractPlainWords { get; set; } = true;
+
+    /// <summary>
+    /// Gets or sets a value indicating whether 提取 () 或 （） 形式的标签.
+    /// </summary>
+    public bool TagRoundBracketEnabled { get; set; } = true;
 }
