@@ -64,6 +64,27 @@ public class FolderCollectionService : IDisposable
     private const double Phase4End = 95.0;  // 创建/更新集合
     private const double Phase5End = 100.0; // 清理过时集合
 
+    /// <summary>
+    /// 标签清洗时从首尾剥离的字符（保守集合：括号、引号、句读、破折与下划线）.
+    /// 注意：句点只剥离首尾，绝不作为分隔符，保证 "123.ui" 这类名称完整保留.
+    /// </summary>
+    private static readonly char[] TagTrimChars =
+    {
+        '(', ')', '[', ']', '{', '}', '<', '>',
+        '（', '）', '【', '】', '《', '》', '〈', '〉', '「', '」', '『', '』',
+        '"', '\'', '“', '”', '‘', '’',
+        ',', '，', '.', '。', '!', '！', '?', '？', ':', '：', ';', '；', '、',
+        '-', '—', '–', '－', '_', '~', '～'
+    };
+
+    /// <summary>
+    /// 标签分隔符：空白（含全角空格）+ 逗号、顿号、分号、冒号.
+    /// 注意：句点不在此列，".ui" 不会被拆开.
+    /// </summary>
+    private static readonly Regex TagSeparatorRegex = new(
+        @"[\s,，;；:：、]+",
+        RegexOptions.Compiled);
+
     private readonly ILibraryManager _libraryManager;
     private readonly ICollectionManager _collectionManager;
     private readonly ILogger<FolderCollectionService> _logger;
@@ -219,6 +240,8 @@ public class FolderCollectionService : IDisposable
         _logger.LogInformation("========== 开始扫描文件夹集合 ==========");
 
         // ---------- 构建标签正则 ----------
+        // 每种格式独立成正则，按固定优先级依次提取；命中片段会被"挖空"，
+        // 因此后面的格式不会重复命中，嵌套写法（如【教程(入门)】）也能正确拆开。
         Regex? hashTagPattern = null;
         if (config.TagHashEnabled)
         {
@@ -228,37 +251,27 @@ public class FolderCollectionService : IDisposable
                 RegexOptions.Compiled);
         }
 
-        var otherPatterns = new List<string>();
-        if (config.TagBraceEnabled)
-        {
-            otherPatterns.Add(@"\{([^}\s]+)\}");
-        }
+        // 圆括号优先级最高：先摘掉括号内容，避免被外层方括号/花括号整段吞掉
+        Regex? roundBracketPattern = config.TagRoundBracketEnabled
+            ? new Regex(@"[\(（]([^\)）\n]+)[\)）]", RegexOptions.Compiled)
+            : null;
 
-        if (config.TagSquareBracketEnabled)
-        {
-            otherPatterns.Add(@"\[([^\]\n]+)\]");
-        }
+        // 花括号允许内含空格，命中后按分隔符拆成多个标签
+        Regex? bracePattern = config.TagBraceEnabled
+            ? new Regex(@"\{([^}\n]+)\}", RegexOptions.Compiled)
+            : null;
 
-        if (config.TagChineseBracketEnabled)
-        {
-            otherPatterns.Add(@"【([^】\n]+)】");
-        }
+        Regex? squareBracketPattern = config.TagSquareBracketEnabled
+            ? new Regex(@"\[([^\]\n]+)\]", RegexOptions.Compiled)
+            : null;
 
-        if (config.TagAtEnabled)
-        {
-            // 同样排除了括号，避免 @User(Name) 把括号吃进去
-            otherPatterns.Add(@"@([^\s@\(（]+)");
-        }
+        Regex? chineseBracketPattern = config.TagChineseBracketEnabled
+            ? new Regex(@"【([^】\n]+)】", RegexOptions.Compiled)
+            : null;
 
-        // 新增：提取中英文圆括号
-        if (config.TagRoundBracketEnabled)
-        {
-            // 匹配 () 或 （） 里的内容，允许里面包含空格
-            otherPatterns.Add(@"[\(（]([^\)）\n]+)[\)）]");
-        }
-
-        Regex? otherTagPattern = otherPatterns.Count > 0
-            ? new Regex(string.Join("|", otherPatterns), RegexOptions.Compiled)
+        Regex? atPattern = config.TagAtEnabled
+            // 排除括号，避免 @User(Name) 把括号内容吃进去
+            ? new Regex(@"@([^\s@\(（]+)", RegexOptions.Compiled)
             : null;
 
         var enabledFormats = new List<string>();
@@ -570,64 +583,21 @@ public class FolderCollectionService : IDisposable
 
                 foreach (var part in parts)
                 {
-                    string textToExtractWords = part;
+                    // 按优先级逐个提取：命中即"挖空"（替换为空格），后续规则不会重复命中。
+                    // 顺序：# → 圆括号 → 花括号 → 方括号 → 中文方括号 → @ → 剩余普通词
+                    var text = ExtractTagsAndBlank(part, hashTagPattern, tagSet);
+                    text = ExtractTagsAndBlank(text, roundBracketPattern, tagSet);
+                    text = ExtractTagsAndBlank(text, bracePattern, tagSet);
+                    text = ExtractTagsAndBlank(text, squareBracketPattern, tagSet);
+                    text = ExtractTagsAndBlank(text, chineseBracketPattern, tagSet);
+                    text = ExtractTagsAndBlank(text, atPattern, tagSet);
 
-                    // 1) # 标签：把 "整段空格分隔内容" 拆成多个独立标签
-                    if (hashTagPattern != null)
-                    {
-                        foreach (Match m in hashTagPattern.Matches(part))
-                        {
-                            if (!m.Groups[1].Success)
-                            {
-                                continue;
-                            }
-
-                            var raw = m.Groups[1].Value;
-                            var tokens = raw.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
-                            foreach (var token in tokens)
-                            {
-                                tagSet.Add(token);
-                            }
-                        }
-
-                        // 将已匹配的 # 标签从字符串中剔除，用空格替代
-                        textToExtractWords = hashTagPattern.Replace(textToExtractWords, " ");
-                    }
-
-                    // 2) 其它标签（{}、[]、【】、@、()）：一个匹配 = 一个标签
-                    if (otherTagPattern != null)
-                    {
-                        foreach (Match m in otherTagPattern.Matches(part))
-                        {
-                            for (int g = 1; g < m.Groups.Count; g++)
-                            {
-                                if (m.Groups[g].Success && !string.IsNullOrEmpty(m.Groups[g].Value))
-                                {
-                                    tagSet.Add(m.Groups[g].Value);
-                                    break;
-                                }
-                            }
-                        }
-
-                        // 将已匹配的其他标签从字符串中剔除，用空格替代
-                        textToExtractWords = otherTagPattern.Replace(textToExtractWords, " ");
-                    }
-
-                    // 3) 提取剩下的普通词汇（不带符号的）
+                    // 提取剩下的普通词汇（不带符号的）
                     if (config.TagExtractPlainWords)
                     {
-                        // 因为标签已经被挖走替换成了空格，剩下的直接用空格拆分
-                        var plainWords = textToExtractWords.Split(new[] { ' ', '\t' }, StringSplitOptions.RemoveEmptyEntries);
-                        foreach (var word in plainWords)
+                        foreach (var token in SplitTagTokens(text))
                         {
-                            // 去掉词语首尾可能残留的标点符号（如逗号、句号）
-                            var cleanWord = word.Trim('，', '。', '！', '？', ',', '.', '!', '?', '(', ')', '（', '）', '-', '_');
-
-                            // 确保不是空的，且必须包含字母或数字（避免纯符号混入）
-                            if (!string.IsNullOrEmpty(cleanWord) && cleanWord.Any(char.IsLetterOrDigit))
-                            {
-                                tagSet.Add(cleanWord);
-                            }
+                            tagSet.Add(token);
                         }
                     }
                 }
@@ -1200,6 +1170,86 @@ public class FolderCollectionService : IDisposable
         {
             return false;
         }
+    }
+
+    /// <summary>
+    /// 用指定格式提取标签，并把命中的整段文本从原字符串中挖空（替换为空格）.
+    /// </summary>
+    /// <param name="text">待处理的文件夹名片段.</param>
+    /// <param name="pattern">该格式的正则（必须只有一个捕获组）；null 表示该格式已关闭.</param>
+    /// <param name="tagSet">标签集合，直接写入.</param>
+    /// <returns>挖空后的剩余文本.</returns>
+    private static string ExtractTagsAndBlank(string text, Regex? pattern, HashSet<string> tagSet)
+    {
+        if (pattern == null || string.IsNullOrEmpty(text))
+        {
+            return text;
+        }
+
+        return pattern.Replace(text, match =>
+        {
+            if (match.Groups.Count > 1 && match.Groups[1].Success)
+            {
+                foreach (var token in SplitTagTokens(match.Groups[1].Value))
+                {
+                    tagSet.Add(token);
+                }
+            }
+
+            return " ";
+        });
+    }
+
+    /// <summary>
+    /// 按分隔符把一段文本拆成多个标签，并逐个清洗.
+    /// 分隔符为空白（含全角空格）与逗号、顿号、分号、冒号；句点不作为分隔符.
+    /// </summary>
+    /// <param name="raw">待拆分的文本.</param>
+    /// <returns>清洗后可用的标签序列.</returns>
+    private static IEnumerable<string> SplitTagTokens(string raw)
+    {
+        if (string.IsNullOrEmpty(raw))
+        {
+            yield break;
+        }
+
+        foreach (var piece in TagSeparatorRegex.Split(raw))
+        {
+            var clean = NormalizeTag(piece);
+            if (clean != null)
+            {
+                yield return clean;
+            }
+        }
+    }
+
+    /// <summary>
+    /// 清洗单个标签：反复剥离首尾空白与标点，过滤空值、纯符号.
+    /// 只处理首尾，内部字符（如 "123.ui" 的句点）原样保留.
+    /// </summary>
+    /// <param name="raw">原始词条.</param>
+    /// <returns>清洗后的标签；无效时返回 null.</returns>
+    private static string? NormalizeTag(string raw)
+    {
+        var value = raw;
+
+        while (true)
+        {
+            var before = value;
+            value = value.Trim().Trim(TagTrimChars);
+
+            if (value.Length == before.Length)
+            {
+                break;
+            }
+        }
+
+        if (string.IsNullOrEmpty(value) || !value.Any(char.IsLetterOrDigit))
+        {
+            return null;
+        }
+
+        return value;
     }
 
     private static string TruncateWithHash(string name, int maxLength)
