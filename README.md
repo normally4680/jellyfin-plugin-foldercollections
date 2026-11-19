@@ -6,7 +6,7 @@
 
 一个 Jellyfin 插件：**按物理文件夹结构自动生成媒体集合**，并从文件夹名中提取标签、自动设置封面。适合个人媒体库、无刮削资源的分类整理，让 Jellyfin 的搜索和筛选能按文件夹结构精准定位内容。
 
-当前版本：**v1.0.9**
+当前版本：**v1.0.10**（最新版本与历史版本见 [Releases](https://github.com/normally4680/jellyfin-plugin-foldercollections/releases)）
 
 ---
 
